@@ -1,0 +1,11 @@
+version: "3"
+services:
+  mlship:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ${MODEL_PATH}:/model/model.pkl
+    environment:
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
