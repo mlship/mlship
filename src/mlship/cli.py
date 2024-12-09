@@ -5,6 +5,8 @@ import json
 import time
 import logging
 from pathlib import Path
+
+from mlship.utils.create_test_model import create_test_model
 from .utils.constants import PID_FILE, METRICS_FILE, LOG_FILE, CONFIG_FILE
 
 logging.basicConfig(level=logging.INFO)
