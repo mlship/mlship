@@ -1,56 +1,123 @@
+import os
+import json
 import pytest
-import joblib
-import numpy as np
-from sklearn.ensemble import RandomForestClassifier
-from mlship.server import ModelServer
-from fastapi.testclient import TestClient
-
-def test_imports():
-    """Test that we can import required packages"""
-    import numpy
-    import scipy
-    import sklearn
-    assert True
-
-def test_randomforest():
-    """Test that we can create a RandomForestClassifier"""
-    from sklearn.ensemble import RandomForestClassifier
-    model = RandomForestClassifier(n_estimators=2)
-    assert model is not None
+from click.testing import CliRunner
+from mlship.cli import cli
+from mlship.utils.constants import PID_FILE, METRICS_FILE, LOG_FILE, CONFIG_FILE
 
 @pytest.fixture
-def test_model():
-    """Create a simple test model"""
-    model = RandomForestClassifier(n_estimators=2)
-    X = np.array([[1, 2], [3, 4]])
-    y = np.array([0, 1])
-    model.fit(X, y)
-    return model
+def runner():
+    return CliRunner()
 
 @pytest.fixture
-def model_path(test_model, tmp_path):
-    """Save test model to temporary file"""
-    model_path = tmp_path / "model.pkl"
-    joblib.dump(test_model, model_path)
-    return str(model_path)
+def cleanup():
+    # Clean up before and after tests
+    for file in [PID_FILE, METRICS_FILE, LOG_FILE, CONFIG_FILE]:
+        if os.path.exists(file):
+            os.remove(file)
+    yield
+    for file in [PID_FILE, METRICS_FILE, LOG_FILE, CONFIG_FILE]:
+        if os.path.exists(file):
+            os.remove(file)
 
-@pytest.fixture
-def client(test_model):
-    """Create test client"""
-    server = ModelServer(test_model)
-    return TestClient(server.app)
+def test_deploy_command_basic(runner, cleanup):
+    """Test basic deployment without daemon mode"""
+    result = runner.invoke(cli, ['deploy', 'test_model.pkl'])
+    assert result.exit_code == 0
+    assert "Model deployed successfully" in result.output
+    assert os.path.exists(PID_FILE)
 
-def test_predict_endpoint(client):
-    """Test prediction endpoint"""
-    response = client.post(
-        "/predict",
-        json={"inputs": [[1, 2]]}
-    )
-    assert response.status_code == 200
-    assert "predictions" in response.json()
+def test_deploy_command_daemon(runner, cleanup):
+    """Test deployment in daemon mode"""
+    result = runner.invoke(cli, ['deploy', 'test_model.pkl', '--daemon'])
+    assert result.exit_code == 0
+    assert "Model deployed at http://localhost:8000" in result.output
+    assert os.path.exists(PID_FILE)
+    assert os.path.exists(METRICS_FILE)
 
-def test_health_endpoint(client):
-    """Test health check endpoint"""
-    response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json()["status"] == "healthy"
+def test_deploy_command_missing_model(runner, cleanup):
+    """Test deployment with missing model file"""
+    result = runner.invoke(cli, ['deploy', 'nonexistent.pkl'])
+    assert result.exit_code == 1
+    assert "Model file not found" in result.output
+
+def test_deploy_command_server_running(runner, cleanup):
+    """Test deployment when server is already running"""
+    # First deployment
+    runner.invoke(cli, ['deploy', 'test_model.pkl'])
+    # Second deployment should fail
+    result = runner.invoke(cli, ['deploy', 'test_model.pkl'])
+    assert result.exit_code == 1
+    assert "Server is already running" in result.output
+
+def test_status_command_no_server(runner, cleanup):
+    """Test status command when no server is running"""
+    result = runner.invoke(cli, ['status'])
+    assert result.exit_code == 0
+    assert "Server not running" in result.output
+
+def test_status_command_with_server(runner, cleanup):
+    """Test status command with running server"""
+    # Deploy first
+    runner.invoke(cli, ['deploy', 'test_model.pkl', '--daemon'])
+    # Check status
+    result = runner.invoke(cli, ['status'])
+    assert result.exit_code == 0
+    assert "Server running" in result.output
+    assert "Uptime" in result.output
+    assert "Requests" in result.output
+
+def test_logs_command_no_logs(runner, cleanup):
+    """Test logs command when no logs exist"""
+    result = runner.invoke(cli, ['logs'])
+    assert result.exit_code == 0
+    assert "No logs available" in result.output
+
+def test_logs_command_with_logs(runner, cleanup):
+    """Test logs command with existing logs"""
+    test_log = "Test log message"
+    with open(LOG_FILE, 'w') as f:
+        f.write(test_log)
+
+    result = runner.invoke(cli, ['logs'])
+    assert result.exit_code == 0
+    assert test_log in result.output
+
+def test_stop_command_no_server(runner, cleanup):
+    """Test stop command when no server is running"""
+    result = runner.invoke(cli, ['stop'])
+    assert result.exit_code == 0
+    assert "No server running" in result.output
+
+def test_stop_command_with_server(runner, cleanup):
+    """Test stop command with running server"""
+    # Deploy first
+    runner.invoke(cli, ['deploy', 'test_model.pkl'])
+    # Stop server
+    result = runner.invoke(cli, ['stop'])
+    assert result.exit_code == 0
+    assert "Server stopped" in result.output
+    assert not os.path.exists(PID_FILE)
+
+def test_stop_command_stale_pid(runner, cleanup):
+    """Test stop command with stale PID file"""
+    # Create a PID file
+    with open(PID_FILE, 'w') as f:
+        f.write("12345")  # Non-existent PID
+    # Stop server
+    result = runner.invoke(cli, ['stop'])
+    assert result.exit_code == 0
+    assert not os.path.exists(PID_FILE)
+
+def test_configure_command(runner):
+    """Test configure command"""
+    result = runner.invoke(cli, ['configure'], input='test-key\ntest-secret\n')
+    assert result.exit_code == 0
+    assert "Configuration saved successfully" in result.output
+    assert os.path.exists(CONFIG_FILE)
+    
+    # Verify config content
+    with open(CONFIG_FILE) as f:
+        config = json.load(f)
+        assert config['aws_key'] == 'test-key'
+        assert config['aws_secret'] == 'test-secret'
