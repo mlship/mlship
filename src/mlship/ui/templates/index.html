@@ -12,14 +12,45 @@
     <script src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+      .predictions-container {
+        max-height: 400px;
+        overflow-y: auto;
+        padding-right: 8px;
+      }
+
+      .predictions-container::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      .predictions-container::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 4px;
+      }
+
+      .predictions-container::-webkit-scrollbar-thumb {
+        background: #888;
+        border-radius: 4px;
+      }
+
+      .predictions-container::-webkit-scrollbar-thumb:hover {
+        background: #555;
+      }
+
+      /* For Firefox */
+      .predictions-container {
+        scrollbar-width: thin;
+        scrollbar-color: #888 #f1f1f1;
+      }
+    </style>
+  </head>
+  <body class="bg-gray-100">
+    <div id="root"></div>
     <script>
       // Pass server-side variables to client
       window.MODEL_INFO = JSON.parse("{{ model_info|tojson|safe }}");
       window.BASE_URL = "{{ base_url }}";
     </script>
-  </head>
-  <body class="bg-gray-100">
-    <div id="root"></div>
     <script
       type="text/babel"
       src="{{ url_for('static', path='js/app.js') }}"
