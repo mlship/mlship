@@ -15,10 +15,31 @@ function App() {
     const [modelInfo, setModelInfo] = React.useState(window.MODEL_INFO || null);
     const [metrics, setMetrics] = React.useState(null);
     const [metricsHistory, setMetricsHistory] = React.useState([]);
-    const [predictions, setPredictions] = React.useState([]);
+    const [predictions, setPredictions] = React.useState(() => {
+        // Initialize predictions from localStorage
+        try {
+            const savedPredictions = localStorage.getItem('mlship_predictions');
+            return savedPredictions ? JSON.parse(savedPredictions).map(pred => ({
+                ...pred,
+                timestamp: new Date(pred.timestamp) // Convert timestamp back to Date object
+            })) : [];
+        } catch (e) {
+            console.error('Error loading predictions from localStorage:', e);
+            return [];
+        }
+    });
     const [error, setError] = React.useState(null);
     const [isLoading, setIsLoading] = React.useState(false);
     const [lastUpdateTime, setLastUpdateTime] = React.useState(Date.now());
+
+    // Save predictions to localStorage whenever they change
+    React.useEffect(() => {
+        try {
+            localStorage.setItem('mlship_predictions', JSON.stringify(predictions));
+        } catch (e) {
+            console.error('Error saving predictions to localStorage:', e);
+        }
+    }, [predictions]);
 
     React.useEffect(() => {
         if (!modelInfo) {
@@ -98,11 +119,17 @@ function App() {
                     <PredictionForm 
                         modelInfo={modelInfo} 
                         onPredict={(newPrediction) => {
-                            setPredictions(prev => [...prev, newPrediction]);
+                            setPredictions(prev => [newPrediction, ...prev]);
                         }}
                         onError={setError}
                     />
-                    <PredictionResults predictions={predictions} />
+                    <PredictionResults 
+                        predictions={predictions}
+                        onClear={() => {
+                            setPredictions([]);
+                            localStorage.removeItem('mlship_predictions');
+                        }}
+                    />
                 </div>
 
                 {/* Middle Row: Real-time Metrics */}
@@ -310,15 +337,25 @@ function PredictionForm({ modelInfo, onPredict, onError }) {
 }
 
 // Prediction Results Component
-function PredictionResults({ predictions }) {
+function PredictionResults({ predictions, onClear }) {
     return (
         <div className="bg-white p-6 rounded-lg shadow">
-            <h2 className="text-2xl font-bold mb-4">Prediction History</h2>
+            <div className="flex justify-between items-center mb-4">
+                <h2 className="text-2xl font-bold">Prediction History</h2>
+                {predictions.length > 0 && (
+                    <button
+                        onClick={onClear}
+                        className="text-sm text-red-600 hover:text-red-800"
+                    >
+                        Clear History
+                    </button>
+                )}
+            </div>
             {predictions.length === 0 ? (
                 <p className="text-gray-500">Make a prediction to see results</p>
             ) : (
                 <div className="predictions-container">
-                    {predictions.slice().reverse().map((pred, i) => (
+                    {predictions.map((pred, i) => (
                         <div key={i} className="p-4 bg-gray-50 rounded border border-gray-200 mb-2">
                             <div className="flex justify-between items-start">
                                 <div>
@@ -330,7 +367,7 @@ function PredictionResults({ predictions }) {
                                     <div className="text-lg">{pred.prediction}</div>
                                 </div>
                                 <div className="text-xs text-gray-500">
-                                    {pred.timestamp.toLocaleTimeString()}
+                                    {new Date(pred.timestamp).toLocaleTimeString()}
                                 </div>
                             </div>
                         </div>
