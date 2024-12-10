@@ -1,4 +1,4 @@
-# MLShip: Simple ML Model Deployment
+# MLship: Simple ML Model Deployment
 
 Deploy machine learning models with a single command.
 
