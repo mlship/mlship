@@ -9,9 +9,12 @@ import time
 import asyncio
 import logging
 import uvicorn
+import signal
+import sys
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from ..utils.constants import METRICS_FILE
+from ..utils.daemon import cleanup_files
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,6 +30,7 @@ class ModelServer:
         self.request_count = 0
         self.total_latency = 0
         self.start_time = time.time()
+        self.should_exit = False
         
         # Set up static files and templates
         self.setup_static_files()
@@ -104,7 +108,7 @@ class ModelServer:
             except Exception as e:
                 logger.error(f"Prediction error: {str(e)}")
                 raise HTTPException(status_code=500, detail=str(e))
-                
+        
         @self.app.get("/health")
         def health():
             return {"status": "healthy"}
@@ -127,7 +131,7 @@ class ModelServer:
                 logger.error(f"WebSocket error: {str(e)}")
             finally:
                 self.active_connections.remove(websocket)
-                
+        
     def get_model_info(self) -> Dict[str, Any]:
         """Extract model information for UI"""
         model_info = {
@@ -161,7 +165,42 @@ class ModelServer:
         with open(METRICS_FILE, 'w') as f:
             json.dump(metrics, f)
             
+    def signal_handler(self, signum, frame):
+        """Handle shutdown signals"""
+        logger.info("Received shutdown signal")
+        self.should_exit = True
+        cleanup_files()
+        sys.exit(0)
+            
     def serve(self, host="0.0.0.0", port=8000):
-        """Start the server"""
+        """Start the server with proper signal handling"""
         logger.info(f"Starting server on {host}:{port}")
-        uvicorn.run(self.app, host=host, port=port, log_level="debug")
+        
+        # Set up signal handlers
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
+        
+        # Configure uvicorn with proper signal handling
+        config = uvicorn.Config(
+            app=self.app,
+            host=host,
+            port=port,
+            log_level="debug",
+            loop="asyncio",
+            reload=False,
+            workers=1
+        )
+        
+        server = uvicorn.Server(config)
+        server.install_signal_handlers = lambda: None  # Disable uvicorn's signal handlers
+        
+        try:
+            server.run()
+        except KeyboardInterrupt:
+            logger.info("Received keyboard interrupt")
+            cleanup_files()
+            sys.exit(0)
+        except Exception as e:
+            logger.error(f"Server error: {str(e)}")
+            cleanup_files()
+            sys.exit(1)
