@@ -317,15 +317,9 @@ function PredictionResults({ predictions }) {
             {predictions.length === 0 ? (
                 <p className="text-gray-500">Make a prediction to see results</p>
             ) : (
-                <div 
-                    className="space-y-2 h-[400px] overflow-y-auto pr-2 custom-scrollbar"
-                    style={{
-                        scrollbarWidth: 'thin',
-                        scrollbarColor: '#94A3B8 #E2E8F0'
-                    }}
-                >
+                <div className="predictions-container">
                     {predictions.slice().reverse().map((pred, i) => (
-                        <div key={i} className="p-4 bg-gray-50 rounded border border-gray-200">
+                        <div key={i} className="p-4 bg-gray-50 rounded border border-gray-200 mb-2">
                             <div className="flex justify-between items-start">
                                 <div>
                                     <div className="font-medium">Input:</div>
