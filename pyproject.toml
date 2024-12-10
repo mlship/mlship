@@ -7,37 +7,51 @@ name = "mlship"
 version = "0.1.0"
 description = "Simple ML Model Deployment"
 authors = [
-    {name = "Luqman Zaceria", email = "luqmanzaceria@gmail.com"}
+    {name = "Your Name", email = "your.email@example.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
 dependencies = [
-    "numpy>=1.19.5",
-    "scipy>=1.6.0",
     "scikit-learn>=1.0.0",
-    "joblib>=1.2.0",
-    "threadpoolctl>=3.1.0",
-    "click>=8.0",
     "fastapi>=0.68.0",
-    "uvicorn>=0.15.0",
-    "pydantic>=1.8.0",
+    "scipy>=1.6.0",
+    "psutil>=5.9.0",
     "boto3>=1.18.0",
+    "threadpoolctl>=3.1.0",
+    "joblib>=1.2.0",
+    "click>=8.0",
+    "pydantic>=1.8.0",
+    "numpy>=1.19.5",
+    "uvicorn>=0.15.0",
     "pyyaml>=5.4.0",
-    "psutil>=5.9.0"
+    "jinja2>=2.11.3",
+    "python-multipart>=0.0.5",
+    "aiofiles>=0.7.0"
 ]
 
 [project.optional-dependencies]
 test = [
     "pytest>=6.0",
     "pytest-cov>=2.0",
-    "httpx>=0.18.0"
 ]
 
 [project.scripts]
 mlship = "mlship.cli:cli"
 
-[tool.pytest.ini_options]
-addopts = "-v"
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-pythonpath = ["src"]
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mlship*"]
+
+[tool.setuptools.package-data]
+"mlship.ui" = [
+    "templates/*.html",
+    "static/js/*.js"
+]

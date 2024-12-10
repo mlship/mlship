@@ -4,10 +4,11 @@ import sys
 import json
 import time
 import logging
+import subprocess
 from pathlib import Path
-
-from mlship.utils.create_test_model import create_test_model
 from .utils.constants import PID_FILE, METRICS_FILE, LOG_FILE, CONFIG_FILE
+from .server.loader import ModelLoader
+from .server.app import ModelServer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,6 +32,40 @@ def cleanup_files():
         if os.path.exists(file):
             os.remove(file)
 
+def start_daemon(model_path, port, ui):
+    """Start server in daemon mode"""
+    # Prepare command
+    cmd = [
+        sys.executable, "-m", "mlship", "deploy",
+        model_path,
+        "--port", str(port),
+        "--foreground"  # Internal flag
+    ]
+    if ui:
+        cmd.append("--ui")
+        
+    # Prepare environment
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    # Start process
+    with open(LOG_FILE, 'w') as log_file:
+        process = subprocess.Popen(
+            cmd,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            env=env,
+            start_new_session=True,  # Daemonize
+            preexec_fn=os.setpgrp  # Detach from terminal
+        )
+        
+    # Wait briefly to ensure process starts
+    time.sleep(1)
+    if process.poll() is not None:
+        raise click.ClickException("Failed to start daemon process")
+        
+    return process.pid
+
 @click.group()
 def cli():
     """MLShip - Simple ML Model Deployment"""
@@ -40,7 +75,9 @@ def cli():
 @click.argument('model_path')
 @click.option('--daemon', is_flag=True, help='Run in daemon mode')
 @click.option('--port', default=8000, help='Port to run the server on')
-def deploy(model_path, daemon, port):
+@click.option('--ui', is_flag=True, help='Enable web interface')
+@click.option('--foreground', is_flag=True, hidden=True, help='Internal flag for daemon mode')
+def deploy(model_path, daemon, port, ui, foreground):
     """Deploy a model"""
     try:
         # Convert model path to absolute path if relative
@@ -49,7 +86,7 @@ def deploy(model_path, daemon, port):
         
         # Check if model exists
         if not os.path.exists(model_path):
-            click.echo("Model file not found: {}".format(model_path), err=True)
+            click.echo(f"Model file not found: {model_path}", err=True)
             sys.exit(1)
         
         # Check if server is already running
@@ -57,20 +94,47 @@ def deploy(model_path, daemon, port):
             click.echo("Server is already running", err=True)
             sys.exit(1)
             
-        # Create PID file
-        write_pid_file()
+        if daemon and not foreground:
+            # Start daemon process
+            pid = start_daemon(model_path, port, ui)
+            write_pid_file(pid)
             
-        if daemon:
-            # Create metrics file for daemon mode
+            # Create initial metrics file
             with open(METRICS_FILE, 'w') as f:
                 json.dump({
                     'start_time': time.time(),
                     'requests': 0,
                     'avg_latency': 0
                 }, f)
-            click.echo(f"Model deployed at http://localhost:{port}")
+                
+            # Show URLs
+            click.echo(f"🚀 API: http://localhost:{port}")
+            if ui:
+                click.echo(f"🎨 UI: http://localhost:{port}/ui")
         else:
-            click.echo("Model deployed successfully")
+            # Run in foreground
+            try:
+                model = ModelLoader.load(model_path)
+                server = ModelServer(model)
+                
+                # Save PID and initialize metrics
+                write_pid_file()
+                with open(METRICS_FILE, 'w') as f:
+                    json.dump({
+                        'start_time': time.time(),
+                        'requests': 0,
+                        'avg_latency': 0
+                    }, f)
+                    
+                if not foreground:
+                    click.echo(f"🚀 API: http://localhost:{port}")
+                    if ui:
+                        click.echo(f"🎨 UI: http://localhost:{port}/ui")
+                        
+                server.serve(host="0.0.0.0", port=port)
+            except Exception as e:
+                cleanup_files()
+                raise click.ClickException(str(e))
             
     except Exception as e:
         cleanup_files()
@@ -160,6 +224,7 @@ def configure(aws_key, aws_secret):
 def create_model(output):
     """Create a test model for deployment"""
     try:
+        from .utils.create_test_model import create_test_model
         model_path = create_test_model(output)
         click.echo(f"✓ Test model created at: {model_path}")
         click.echo(f"Run 'mlship deploy {output}' to deploy the model")
