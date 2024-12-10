@@ -57,9 +57,11 @@ function App() {
                 });
         }
 
-        // Setup WebSocket for metrics
-        const ws = new WebSocket(`ws://${window.location.host}${BASE_URL}/ws/metrics`);
-        ws.onmessage = (event) => {
+        // Setup WebSocket for metrics and predictions
+        const wsMetrics = new WebSocket(`ws://${window.location.host}${BASE_URL}/ws/metrics`);
+        const wsPredictions = new WebSocket(`ws://${window.location.host}${BASE_URL}/ws/predictions`);
+
+        wsMetrics.onmessage = (event) => {
             const now = Date.now();
             // Only update every 2 seconds
             if (now - lastUpdateTime >= 2000) {
@@ -75,12 +77,29 @@ function App() {
                 setLastUpdateTime(now);
             }
         };
-        ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
+
+        wsPredictions.onmessage = (event) => {
+            const prediction = JSON.parse(event.data);
+            setPredictions(prev => [{
+                inputs: prediction.inputs[0],
+                prediction: prediction.predictions[0],
+                timestamp: new Date()
+            }, ...prev]);
+        };
+
+        wsMetrics.onerror = (error) => {
+            console.error('Metrics WebSocket error:', error);
             setError('Failed to connect to metrics stream');
         };
 
-        return () => ws.close();
+        wsPredictions.onerror = (error) => {
+            console.error('Predictions WebSocket error:', error);
+        };
+
+        return () => {
+            wsMetrics.close();
+            wsPredictions.close();
+        };
     }, [lastUpdateTime]);
 
     if (isLoading) {
@@ -288,6 +307,8 @@ function PredictionForm({ modelInfo, onPredict, onError }) {
                     prediction: data.predictions[0],
                     timestamp: new Date()
                 });
+                // Clear inputs after successful prediction
+                setInputs(Array(modelInfo.n_features || 0).fill(''));
             }
         } catch (err) {
             onError(err.message);

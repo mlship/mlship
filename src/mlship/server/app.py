@@ -26,7 +26,8 @@ class ModelServer:
     def __init__(self, model):
         self.model = model
         self.app = FastAPI(debug=True)
-        self.active_connections: List[WebSocket] = []
+        self.metrics_connections: List[WebSocket] = []
+        self.prediction_connections: List[WebSocket] = []
         self.request_count = 0
         self.total_latency = 0
         self.start_time = time.time()
@@ -40,6 +41,14 @@ class ModelServer:
         self.setup_static_files()
         self.setup_routes()
         
+    async def broadcast_prediction(self, prediction_data: dict):
+        """Broadcast prediction to all connected clients"""
+        for connection in self.prediction_connections:
+            try:
+                await connection.send_json(prediction_data)
+            except Exception as e:
+                logger.error(f"Error broadcasting prediction: {str(e)}")
+                
     def setup_static_files(self):
         """Set up static files and templates with proper paths"""
         try:
@@ -52,12 +61,6 @@ class ModelServer:
             
             logger.info(f"Static directory: {static_dir} (exists: {static_dir.exists()})")
             logger.info(f"Template directory: {template_dir} (exists: {template_dir.exists()})")
-            
-            # List contents of directories
-            if static_dir.exists():
-                logger.info(f"Static directory contents: {list(static_dir.glob('**/*'))}")
-            if template_dir.exists():
-                logger.info(f"Template directory contents: {list(template_dir.glob('**/*'))}")
             
             # Mount static files
             self.app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
@@ -108,7 +111,16 @@ class ModelServer:
                 self.total_latency += (time.time() - start_time) * 1000
                 self.update_metrics()
                 
-                return {"predictions": predictions.tolist()}
+                # Prepare prediction response
+                prediction_data = {
+                    "inputs": request.inputs,
+                    "predictions": predictions.tolist()
+                }
+                
+                # Broadcast prediction to all connected clients
+                await self.broadcast_prediction(prediction_data)
+                
+                return prediction_data
             except Exception as e:
                 logger.error(f"Prediction error: {str(e)}")
                 raise HTTPException(status_code=500, detail=str(e))
@@ -118,9 +130,9 @@ class ModelServer:
             return {"status": "healthy"}
             
         @self.app.websocket("/ws/metrics")
-        async def websocket_endpoint(websocket: WebSocket):
+        async def metrics_websocket(websocket: WebSocket):
             await websocket.accept()
-            self.active_connections.append(websocket)
+            self.metrics_connections.append(websocket)
             try:
                 while True:
                     # Send metrics updates every second
@@ -132,9 +144,22 @@ class ModelServer:
                     await websocket.send_json(metrics)
                     await asyncio.sleep(1)
             except Exception as e:
-                logger.error(f"WebSocket error: {str(e)}")
+                logger.error(f"Metrics WebSocket error: {str(e)}")
             finally:
-                self.active_connections.remove(websocket)
+                self.metrics_connections.remove(websocket)
+
+        @self.app.websocket("/ws/predictions")
+        async def predictions_websocket(websocket: WebSocket):
+            await websocket.accept()
+            self.prediction_connections.append(websocket)
+            try:
+                while True:
+                    # Keep connection alive
+                    await asyncio.sleep(1)
+            except Exception as e:
+                logger.error(f"Predictions WebSocket error: {str(e)}")
+            finally:
+                self.prediction_connections.remove(websocket)
         
     def get_model_info(self) -> Dict[str, Any]:
         """Extract model information for UI"""
