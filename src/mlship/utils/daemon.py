@@ -12,6 +12,15 @@ from .constants import PID_FILE, METRICS_FILE, LOG_FILE, MLSHIP_DIR
 
 logger = logging.getLogger(__name__)
 
+def cleanup_files():
+    """Clean up all temporary files"""
+    for file in [PID_FILE, METRICS_FILE, LOG_FILE]:
+        try:
+            if os.path.exists(file):
+                os.remove(file)
+        except Exception as e:
+            logger.warning(f"Failed to remove {file}: {str(e)}")
+
 def save_pid(pid):
     """Save process ID to file"""
     with open(PID_FILE, 'w') as f:
@@ -63,9 +72,7 @@ def verify_server_running(port):
 def start_daemon(model_path, host, port):
     """Start server as a daemon"""
     # Clean up any existing files
-    for file in [PID_FILE, METRICS_FILE, LOG_FILE]:
-        if os.path.exists(file):
-            os.remove(file)
+    cleanup_files()
     
     # Get the path to the current Python executable and entry point
     python_path = sys.executable

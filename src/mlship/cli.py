@@ -11,6 +11,7 @@ from pathlib import Path
 from .utils.constants import PID_FILE, METRICS_FILE, LOG_FILE, CONFIG_FILE
 from .server.loader import ModelLoader
 from .server.app import ModelServer
+from .utils.daemon import cleanup_files
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -47,41 +48,41 @@ def find_mlship_processes():
 def kill_process_tree(pid):
     """Kill a process and all its children"""
     try:
-        # First try SIGTERM
-        os.kill(pid, signal.SIGTERM)
-        time.sleep(0.1)  # Give it a moment to die gracefully
+        parent = psutil.Process(pid)
+        children = parent.children(recursive=True)
         
-        # If still running, force kill with SIGKILL
-        try:
-            os.kill(pid, 0)  # Check if process still exists
-            os.kill(pid, signal.SIGKILL)  # Force kill
-            time.sleep(0.1)  # Give it a moment
-            
-            # If somehow still alive, try one last time
+        # Kill children first
+        for child in children:
             try:
-                os.kill(pid, 0)
-                os.killpg(os.getpgid(pid), signal.SIGKILL)  # Kill entire process group
-            except OSError:
+                child.kill()
+            except psutil.NoSuchProcess:
                 pass
-        except OSError:
-            pass  # Process already dead
-            
-    except ProcessLookupError:
-        pass  # Process already dead
-
-def cleanup_files():
-    """Clean up state files"""
-    for file in [PID_FILE, METRICS_FILE]:
+                
+        # Kill parent
         try:
-            if os.path.exists(file):
-                os.remove(file)
-        except Exception as e:
-            logger.warning(f"Failed to remove {file}: {e}")
+            parent.kill()
+        except psutil.NoSuchProcess:
+            pass
+            
+        # Wait for processes to die
+        gone, alive = psutil.wait_procs([parent] + children, timeout=3)
+        
+        # Force kill if any are still alive
+        for p in alive:
+            try:
+                p.kill()
+            except psutil.NoSuchProcess:
+                pass
+                
+    except psutil.NoSuchProcess:
+        pass
 
 def write_pid_file(pid=None):
     """Write PID to file"""
+    if pid is None:
+        pid = os.getpid()
     with open(PID_FILE, 'w') as f:
-        f.write(str(pid or os.getpid()))
+        f.write(str(pid))
 
 def read_pid_file():
     """Read PID from file"""
@@ -194,7 +195,7 @@ def deploy(model_path, daemon, port, ui, foreground):
             except Exception as e:
                 cleanup_files()
                 raise click.ClickException(str(e))
-            
+                
     except Exception as e:
         cleanup_files()
         logger.error(f"Deployment failed: {str(e)}")
