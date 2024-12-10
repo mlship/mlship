@@ -1,89 +1,167 @@
-import numpy as np
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, WebSocket, Request, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
-import uvicorn
-from typing import Any, List, Optional
-import logging
-import time
+import numpy as np
 import json
+import time
+import asyncio
+import logging
+import uvicorn
 from pathlib import Path
+from typing import List, Dict, Any, Optional
+from ..utils.constants import METRICS_FILE
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-METRICS_FILE = Path.home() / '.mlship' / 'metrics.json'
-
 class PredictRequest(BaseModel):
-    inputs: Any
-
-class PredictResponse(BaseModel):
-    predictions: List
-    metadata: Optional[dict] = None
-
-def convert_numpy_types(obj):
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    elif isinstance(obj, (np.int_, np.intc, np.intp, np.int8, np.int16, np.int32, np.int64,
-                         np.uint8, np.uint16, np.uint32, np.uint64)):
-        return int(obj)
-    elif isinstance(obj, (np.float_, np.float16, np.float32, np.float64)):
-        return float(obj)
-    elif isinstance(obj, (np.bool_)):
-        return bool(obj)
-    elif isinstance(obj, list):
-        return [convert_numpy_types(item) for item in obj]
-    return obj
+    inputs: List[List[float]]
 
 class ModelServer:
     def __init__(self, model):
         self.model = model
-        self.app = self._create_app()
+        self.app = FastAPI(debug=True)
+        self.active_connections: List[WebSocket] = []
         self.request_count = 0
         self.total_latency = 0
-
-    def update_metrics(self):
-        """Update server metrics file"""
-        avg_latency = self.total_latency / self.request_count if self.request_count > 0 else 0
-        metrics = {
-            'start_time': getattr(self, 'start_time', time.time()),
-            'requests': self.request_count,
-            'avg_latency': round(avg_latency, 2)
-        }
-        with open(METRICS_FILE, 'w') as f:
-            json.dump(metrics, f)
-
-    def _create_app(self):
-        app = FastAPI(title="MLShip Server")
-
-        @app.post("/predict", response_model=PredictResponse)
+        self.start_time = time.time()
+        
+        # Set up static files and templates
+        self.setup_static_files()
+        self.setup_routes()
+        
+    def setup_static_files(self):
+        """Set up static files and templates with proper paths"""
+        try:
+            # Get the package root directory
+            package_dir = Path(__file__).parent.parent
+            
+            # Set up paths
+            static_dir = package_dir / "ui" / "static"
+            template_dir = package_dir / "ui" / "templates"
+            
+            logger.info(f"Static directory: {static_dir} (exists: {static_dir.exists()})")
+            logger.info(f"Template directory: {template_dir} (exists: {template_dir.exists()})")
+            
+            # List contents of directories
+            if static_dir.exists():
+                logger.info(f"Static directory contents: {list(static_dir.glob('**/*'))}")
+            if template_dir.exists():
+                logger.info(f"Template directory contents: {list(template_dir.glob('**/*'))}")
+            
+            # Mount static files
+            self.app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+            self.templates = Jinja2Templates(directory=str(template_dir))
+            
+        except Exception as e:
+            logger.error(f"Error setting up static files: {str(e)}")
+            raise
+        
+    def setup_routes(self):
+        @self.app.get("/")
+        async def redirect_to_ui():
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(url="/ui")
+            
+        @self.app.get("/ui", response_class=HTMLResponse)
+        async def ui(request: Request):
+            try:
+                logger.info(f"Serving UI template for request: {request.url}")
+                model_info = self.get_model_info()
+                logger.info(f"Model info: {model_info}")
+                
+                return self.templates.TemplateResponse(
+                    "index.html",
+                    {
+                        "request": request,
+                        "model_info": model_info,
+                        "base_url": str(request.base_url).rstrip('/')
+                    }
+                )
+            except Exception as e:
+                logger.error(f"Error serving UI template: {str(e)}", exc_info=True)
+                raise HTTPException(status_code=500, detail=str(e))
+            
+        @self.app.get("/api/model-info")
+        def model_info():
+            return self.get_model_info()
+            
+        @self.app.post("/api/predict")
         async def predict(request: PredictRequest):
             try:
                 start_time = time.time()
-                logger.info(f"Processing prediction request")
-                predictions = self.model.predict(request.inputs)
-                # Convert all numpy types to Python native types
-                predictions = convert_numpy_types(predictions)
+                inputs = np.array(request.inputs)
+                predictions = self.model.predict(inputs)
                 
                 # Update metrics
                 self.request_count += 1
-                self.total_latency += (time.time() - start_time) * 1000  # Convert to ms
+                self.total_latency += (time.time() - start_time) * 1000
                 self.update_metrics()
                 
-                return {
-                    "predictions": predictions,
-                    "metadata": {"model_version": getattr(self.model, "version", "unknown")}
-                }
+                return {"predictions": predictions.tolist()}
             except Exception as e:
                 logger.error(f"Prediction error: {str(e)}")
                 raise HTTPException(status_code=500, detail=str(e))
-
-        @app.get("/health")
-        async def health():
+                
+        @self.app.get("/health")
+        def health():
             return {"status": "healthy"}
-
-        return app
-
+            
+        @self.app.websocket("/ws/metrics")
+        async def websocket_endpoint(websocket: WebSocket):
+            await websocket.accept()
+            self.active_connections.append(websocket)
+            try:
+                while True:
+                    # Send metrics updates every second
+                    metrics = {
+                        'start_time': self.start_time,
+                        'requests': self.request_count,
+                        'avg_latency': round(self.total_latency / max(1, self.request_count), 2)
+                    }
+                    await websocket.send_json(metrics)
+                    await asyncio.sleep(1)
+            except Exception as e:
+                logger.error(f"WebSocket error: {str(e)}")
+            finally:
+                self.active_connections.remove(websocket)
+                
+    def get_model_info(self) -> Dict[str, Any]:
+        """Extract model information for UI"""
+        model_info = {
+            "type": type(self.model).__name__,
+            "params": {},
+            "features": [],
+            "n_features": None
+        }
+        
+        # Get model parameters
+        if hasattr(self.model, "get_params"):
+            model_info["params"] = self.model.get_params()
+            
+        # Try to get feature names
+        if hasattr(self.model, "feature_names_in_"):
+            model_info["features"] = self.model.feature_names_in_.tolist()
+        
+        # Get input shape if available
+        if hasattr(self.model, "n_features_in_"):
+            model_info["n_features"] = self.model.n_features_in_
+            
+        return model_info
+        
+    def update_metrics(self):
+        """Update metrics file"""
+        metrics = {
+            'start_time': self.start_time,
+            'requests': self.request_count,
+            'avg_latency': round(self.total_latency / max(1, self.request_count), 2)
+        }
+        with open(METRICS_FILE, 'w') as f:
+            json.dump(metrics, f)
+            
     def serve(self, host="0.0.0.0", port=8000):
+        """Start the server"""
         logger.info(f"Starting server on {host}:{port}")
-        self.start_time = time.time()
-        uvicorn.run(self.app, host=host, port=port)
+        uvicorn.run(self.app, host=host, port=port, log_level="debug")

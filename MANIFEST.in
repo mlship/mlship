@@ -1,0 +1,2 @@
+include src/mlship/ui/templates/*.html
+include src/mlship/ui/static/js/*.js 
