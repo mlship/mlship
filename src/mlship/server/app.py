@@ -32,6 +32,10 @@ class ModelServer:
         self.start_time = time.time()
         self.should_exit = False
         
+        # Set up signal handlers
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
+        
         # Set up static files and templates
         self.setup_static_files()
         self.setup_routes()
@@ -175,10 +179,6 @@ class ModelServer:
     def serve(self, host="0.0.0.0", port=8000):
         """Start the server with proper signal handling"""
         logger.info(f"Starting server on {host}:{port}")
-        
-        # Set up signal handlers
-        signal.signal(signal.SIGINT, self.signal_handler)
-        signal.signal(signal.SIGTERM, self.signal_handler)
         
         # Configure uvicorn with proper signal handling
         config = uvicorn.Config(
