@@ -5,6 +5,8 @@ import json
 import time
 import logging
 import subprocess
+import psutil
+import signal
 from pathlib import Path
 from .utils.constants import PID_FILE, METRICS_FILE, LOG_FILE, CONFIG_FILE
 from .server.loader import ModelLoader
@@ -12,6 +14,69 @@ from .server.app import ModelServer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def find_mlship_processes():
+    """Find all mlship server processes"""
+    mlship_pids = []
+    
+    # Find by command line
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            cmdline = ' '.join(proc.info['cmdline'] or [])
+            if ('mlship' in cmdline and 'deploy' in cmdline) or 'uvicorn' in cmdline:
+                mlship_pids.append(proc.pid)
+                # Also get child processes
+                try:
+                    children = psutil.Process(proc.pid).children(recursive=True)
+                    mlship_pids.extend([child.pid for child in children])
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+            
+    # Find by port usage
+    try:
+        output = subprocess.check_output(['lsof', '-t', '-i:8000'])
+        port_pids = [int(pid) for pid in output.decode().split()]
+        mlship_pids.extend(port_pids)
+    except (subprocess.CalledProcessError, ValueError):
+        pass
+        
+    return list(set(mlship_pids))  # Remove duplicates
+
+def kill_process_tree(pid):
+    """Kill a process and all its children"""
+    try:
+        # First try SIGTERM
+        os.kill(pid, signal.SIGTERM)
+        time.sleep(0.1)  # Give it a moment to die gracefully
+        
+        # If still running, force kill with SIGKILL
+        try:
+            os.kill(pid, 0)  # Check if process still exists
+            os.kill(pid, signal.SIGKILL)  # Force kill
+            time.sleep(0.1)  # Give it a moment
+            
+            # If somehow still alive, try one last time
+            try:
+                os.kill(pid, 0)
+                os.killpg(os.getpgid(pid), signal.SIGKILL)  # Kill entire process group
+            except OSError:
+                pass
+        except OSError:
+            pass  # Process already dead
+            
+    except ProcessLookupError:
+        pass  # Process already dead
+
+def cleanup_files():
+    """Clean up state files"""
+    for file in [PID_FILE, METRICS_FILE]:
+        try:
+            if os.path.exists(file):
+                os.remove(file)
+        except Exception as e:
+            logger.warning(f"Failed to remove {file}: {e}")
 
 def write_pid_file(pid=None):
     """Write PID to file"""
@@ -25,12 +90,6 @@ def read_pid_file():
             return int(f.read().strip())
     except (FileNotFoundError, ValueError):
         return None
-
-def cleanup_files():
-    """Clean up state files"""
-    for file in [PID_FILE, METRICS_FILE]:
-        if os.path.exists(file):
-            os.remove(file)
 
 def start_daemon(model_path, port, ui):
     """Start server in daemon mode"""
@@ -146,9 +205,30 @@ def deploy(model_path, daemon, port, ui, foreground):
 def stop():
     """Stop the server"""
     try:
-        if not os.path.exists(PID_FILE):
+        # Find all mlship processes
+        mlship_pids = find_mlship_processes()
+        
+        if not mlship_pids:
             click.echo("No server running")
+            cleanup_files()
             return
+            
+        # Try normal kill first
+        for pid in mlship_pids:
+            kill_process_tree(pid)
+            
+        # Check if anything is still running
+        time.sleep(0.5)
+        remaining_pids = find_mlship_processes()
+        
+        if remaining_pids:
+            click.echo("Some processes require elevated privileges to stop...")
+            try:
+                # Try sudo kill
+                subprocess.check_call(['sudo', 'pkill', '-9', '-f', 'mlship|uvicorn'])
+                subprocess.check_call(['sudo', 'lsof', '-t', '-i:8000', '|', 'xargs', 'kill', '-9'], shell=True)
+            except subprocess.CalledProcessError:
+                click.echo("Warning: Could not stop all processes. Try running 'sudo mlship stop'", err=True)
             
         cleanup_files()
         click.echo("Server stopped")
