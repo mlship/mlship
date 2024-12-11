@@ -313,3 +313,7 @@ def create_model(output):
         logger.error(f"Failed to create test model: {str(e)}")
         click.echo(str(e), err=True)
         sys.exit(1)
+
+def main():
+    """Entry point for the CLI"""
+    cli()

@@ -10,199 +10,10 @@ function LoadingSpinner() {
     );
 }
 
-// Main App Component
-function App() {
-    const [modelInfo, setModelInfo] = React.useState(window.MODEL_INFO || null);
-    const [metrics, setMetrics] = React.useState(null);
-    const [metricsHistory, setMetricsHistory] = React.useState([]);
-    const [predictions, setPredictions] = React.useState(() => {
-        // Initialize predictions from localStorage
-        try {
-            const savedPredictions = localStorage.getItem('mlship_predictions');
-            return savedPredictions ? JSON.parse(savedPredictions).map(pred => ({
-                ...pred,
-                timestamp: new Date(pred.timestamp) // Convert timestamp back to Date object
-            })) : [];
-        } catch (e) {
-            console.error('Error loading predictions from localStorage:', e);
-            return [];
-        }
-    });
-    const [error, setError] = React.useState(null);
-    const [isLoading, setIsLoading] = React.useState(false);
-    const [lastUpdateTime, setLastUpdateTime] = React.useState(Date.now());
-
-    // Save predictions to localStorage whenever they change
-    React.useEffect(() => {
-        try {
-            localStorage.setItem('mlship_predictions', JSON.stringify(predictions));
-        } catch (e) {
-            console.error('Error saving predictions to localStorage:', e);
-        }
-    }, [predictions]);
-
-    React.useEffect(() => {
-        if (!modelInfo) {
-            setIsLoading(true);
-            // Fetch model info if not provided in template
-            fetch(`${BASE_URL}/api/model-info`)
-                .then(res => res.json())
-                .then(data => {
-                    setModelInfo(data);
-                    setIsLoading(false);
-                })
-                .catch(err => {
-                    setError(err.message);
-                    setIsLoading(false);
-                });
-        }
-
-        // Setup WebSocket for metrics and predictions
-        const wsMetrics = new WebSocket(`ws://${window.location.host}${BASE_URL}/ws/metrics`);
-        const wsPredictions = new WebSocket(`ws://${window.location.host}${BASE_URL}/ws/predictions`);
-
-        wsMetrics.onmessage = (event) => {
-            const now = Date.now();
-            // Only update every 2 seconds
-            if (now - lastUpdateTime >= 2000) {
-                const newMetrics = JSON.parse(event.data);
-                setMetrics(newMetrics);
-                setMetricsHistory(prev => {
-                    const newHistory = [...prev, {
-                        time: new Date(),
-                        ...newMetrics
-                    }].slice(-30); // Keep last 30 data points
-                    return newHistory;
-                });
-                setLastUpdateTime(now);
-            }
-        };
-
-        wsPredictions.onmessage = (event) => {
-            const prediction = JSON.parse(event.data);
-            setPredictions(prev => [{
-                inputs: prediction.inputs[0],
-                prediction: prediction.predictions[0],
-                timestamp: new Date()
-            }, ...prev]);
-        };
-
-        wsMetrics.onerror = (error) => {
-            console.error('Metrics WebSocket error:', error);
-            setError('Failed to connect to metrics stream');
-        };
-
-        wsPredictions.onerror = (error) => {
-            console.error('Predictions WebSocket error:', error);
-        };
-
-        return () => {
-            wsMetrics.close();
-            wsPredictions.close();
-        };
-    }, [lastUpdateTime]);
-
-    if (isLoading) {
-        return (
-            <div className="container mx-auto px-4 py-8">
-                <header className="mb-8">
-                    <h1 className="text-4xl font-bold text-gray-800">MLship Dashboard</h1>
-                </header>
-                <LoadingSpinner />
-            </div>
-        );
-    }
-
-    if (error) {
-        return (
-            <div className="container mx-auto px-4 py-8">
-                <header className="mb-8">
-                    <h1 className="text-4xl font-bold text-gray-800">MLship Dashboard</h1>
-                </header>
-                <div className="bg-red-100 text-red-700 p-4 rounded">
-                    Error: {error}
-                </div>
-            </div>
-        );
-    }
-
-    return (
-        <div className="container mx-auto px-4 py-8">
-            <header className="mb-8">
-                <h1 className="text-4xl font-bold text-gray-800">MLship Dashboard</h1>
-            </header>
-
-            <div className="grid grid-cols-1 gap-6">
-                {/* Top Row: Prediction Interface */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <PredictionForm 
-                        modelInfo={modelInfo} 
-                        onPredict={(newPrediction) => {
-                            setPredictions(prev => [newPrediction, ...prev]);
-                        }}
-                        onError={setError}
-                    />
-                    <PredictionResults 
-                        predictions={predictions}
-                        onClear={() => {
-                            setPredictions([]);
-                            localStorage.removeItem('mlship_predictions');
-                        }}
-                    />
-                </div>
-
-                {/* Middle Row: Real-time Metrics */}
-                <div className="grid grid-cols-1 gap-6">
-                    <MetricsCard metrics={metrics} metricsHistory={metricsHistory} />
-                </div>
-
-                {/* Bottom Row: Model Info */}
-                <div className="grid grid-cols-1">
-                    <ModelInfoCard modelInfo={modelInfo} />
-                </div>
-            </div>
-        </div>
-    );
-}
-
-// Model Info Component
-function ModelInfoCard({ modelInfo }) {
-    if (!modelInfo) return <LoadingSpinner />;
-
-    return (
-        <div className="bg-white p-6 rounded-lg shadow">
-            <h2 className="text-2xl font-bold mb-4">Model Information</h2>
-            <div className="space-y-2">
-                <p><span className="font-semibold">Type:</span> {modelInfo.type}</p>
-                <div>
-                    <h3 className="font-semibold">Parameters:</h3>
-                    <pre className="bg-gray-50 p-2 rounded text-sm overflow-auto">
-                        {JSON.stringify(modelInfo.params, null, 2)}
-                    </pre>
-                </div>
-                {modelInfo.features.length > 0 && (
-                    <div>
-                        <h3 className="font-semibold">Features:</h3>
-                        <ul className="list-disc list-inside">
-                            {modelInfo.features.map((feature, i) => (
-                                <li key={i}>{feature}</li>
-                            ))}
-                        </ul>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-}
-
 // Metrics Component
 function MetricsCard({ metrics, metricsHistory }) {
-    if (!metrics) return <LoadingSpinner />;
-
-    const uptime = Math.floor((Date.now() / 1000 - metrics.start_time) / 60);
-
     React.useEffect(() => {
-        if (metricsHistory.length > 0) {
+        if (metricsHistory && metricsHistory.length > 0) {
             const latencyTrace = {
                 x: metricsHistory.map(m => m.time),
                 y: metricsHistory.map(m => m.avg_latency),
@@ -245,7 +56,8 @@ function MetricsCard({ metrics, metricsHistory }) {
             };
 
             const config = {
-                displayModeBar: false
+                displayModeBar: false,
+                responsive: true
             };
 
             Plotly.newPlot('metrics-chart', [latencyTrace, requestsTrace], layout, config);
@@ -255,27 +67,107 @@ function MetricsCard({ metrics, metricsHistory }) {
     return (
         <div className="bg-white p-6 rounded-lg shadow">
             <h2 className="text-2xl font-bold mb-4">Real-time Metrics</h2>
-            
-            {/* Current Values */}
-            <div className="grid grid-cols-3 gap-4 mb-6">
-                <div className="text-center">
-                    <p className="text-gray-600">Uptime</p>
-                    <p className="text-2xl font-bold">{uptime}m</p>
+            <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="bg-gray-50 p-4 rounded-lg">
+                    <p className="text-sm text-gray-500">Requests</p>
+                    <p className="text-2xl font-semibold">{metrics ? metrics.requests : 0}</p>
                 </div>
-                <div className="text-center">
-                    <p className="text-gray-600">Requests</p>
-                    <p className="text-2xl font-bold">{metrics.requests}</p>
-                </div>
-                <div className="text-center">
-                    <p className="text-gray-600">Avg Latency</p>
-                    <p className="text-2xl font-bold">{metrics.avg_latency}ms</p>
+                <div className="bg-gray-50 p-4 rounded-lg">
+                    <p className="text-sm text-gray-500">Avg Latency (ms)</p>
+                    <p className="text-2xl font-semibold">{metrics ? metrics.avg_latency : 0}</p>
                 </div>
             </div>
-
-            {/* Metrics Chart */}
             <div id="metrics-chart" className="w-full"></div>
         </div>
     );
+}
+
+// Input Component based on type
+function ModelInput({ type, value, onChange, disabled }) {
+    switch (type) {
+        case 'numeric':
+            return (
+                <input
+                    type="number"
+                    step="any"
+                    value={value}
+                    onChange={onChange}
+                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                    required
+                    disabled={disabled}
+                />
+            );
+        case 'text':
+            return (
+                <textarea
+                    value={value}
+                    onChange={onChange}
+                    className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                    rows="3"
+                    required
+                    disabled={disabled}
+                />
+            );
+        case 'image':
+            return (
+                <div className="mt-1">
+                    <input
+                        type="file"
+                        accept="image/*"
+                        onChange={onChange}
+                        className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"
+                        disabled={disabled}
+                    />
+                    {value && (
+                        <div className="mt-2">
+                            <img 
+                                src={typeof value === 'string' ? value : URL.createObjectURL(value)} 
+                                alt="Preview" 
+                                className="max-h-48 rounded-md"
+                            />
+                        </div>
+                    )}
+                </div>
+            );
+        default:
+            return null;
+    }
+}
+
+// Output Component based on type
+function PredictionOutput({ type, data }) {
+    switch (type) {
+        case 'numeric':
+            return <div className="text-lg">{Number(data).toFixed(4)}</div>;
+        case 'label':
+            return (
+                <div>
+                    <div className="text-lg">{data.label}</div>
+                    {data.score !== undefined && (
+                        <div className="text-sm text-gray-500">
+                            Confidence: {(data.score * 100).toFixed(2)}%
+                        </div>
+                    )}
+                </div>
+            );
+        case 'text':
+            return <div className="text-lg whitespace-pre-wrap">{data.generated_text}</div>;
+        case 'segmentation':
+            return (
+                <div>
+                    <div className="text-lg">Segments detected: {data.segments.length}</div>
+                    <ul className="mt-2 text-sm">
+                        {data.segments.map((segment, i) => (
+                            <li key={i} className="text-gray-600">
+                                {segment.label}: {(segment.score * 100).toFixed(2)}%
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            );
+        default:
+            return <div className="text-lg">{JSON.stringify(data)}</div>;
+    }
 }
 
 // Prediction Form Component
@@ -283,7 +175,9 @@ function PredictionForm({ modelInfo, onPredict, onError }) {
     if (!modelInfo) return null;
 
     const [inputs, setInputs] = React.useState(
-        Array(modelInfo.n_features || 0).fill('')
+        modelInfo.input_type === 'numeric' 
+            ? Array(modelInfo.n_features || 0).fill('')
+            : ['']
     );
     const [isSubmitting, setIsSubmitting] = React.useState(false);
 
@@ -291,29 +185,66 @@ function PredictionForm({ modelInfo, onPredict, onError }) {
         e.preventDefault();
         setIsSubmitting(true);
         try {
-            const response = await fetch(`${BASE_URL}/api/predict`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    inputs: [inputs.map(Number)]
-                })
-            });
-            const data = await response.json();
-            if (data.error) {
-                onError(data.error);
-            } else {
-                onPredict({
-                    inputs: inputs.map(Number),
-                    prediction: data.predictions[0],
-                    timestamp: new Date()
+            const formData = new FormData();
+            
+            if (modelInfo.input_type === 'image') {
+                formData.append('image', inputs[0]);
+                const response = await fetch(`${BASE_URL}/api/predict`, {
+                    method: 'POST',
+                    body: formData
                 });
-                // Clear inputs after successful prediction
-                setInputs(Array(modelInfo.n_features || 0).fill(''));
+                const data = await response.json();
+                if (data.error) {
+                    onError(data.error);
+                } else {
+                    onPredict({
+                        inputs: [inputs[0].name],
+                        prediction: data.predictions[0],
+                        timestamp: new Date()
+                    });
+                    setInputs(['']);
+                }
+            } else {
+                const response = await fetch(`${BASE_URL}/api/predict`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        inputs: modelInfo.input_type === 'numeric' 
+                            ? [inputs.map(Number)]
+                            : inputs
+                    })
+                });
+                const data = await response.json();
+                if (data.error) {
+                    onError(data.error);
+                } else {
+                    onPredict({
+                        inputs: modelInfo.input_type === 'numeric' 
+                            ? inputs.map(Number)
+                            : inputs,
+                        prediction: data.predictions[0],
+                        timestamp: new Date()
+                    });
+                    setInputs(modelInfo.input_type === 'numeric' 
+                        ? Array(modelInfo.n_features || 0).fill('')
+                        : ['']
+                    );
+                }
             }
         } catch (err) {
             onError(err.message);
         } finally {
             setIsSubmitting(false);
+        }
+    };
+
+    const handleInputChange = (index, value) => {
+        if (modelInfo.input_type === 'image') {
+            setInputs([value.target.files[0]]);
+        } else {
+            const newInputs = [...inputs];
+            newInputs[index] = modelInfo.input_type === 'text' ? value.target.value : value.target.value;
+            setInputs(newInputs);
         }
     };
 
@@ -324,19 +255,12 @@ function PredictionForm({ modelInfo, onPredict, onError }) {
                 {inputs.map((value, i) => (
                     <div key={i}>
                         <label className="block text-sm font-medium text-gray-700">
-                            {modelInfo.features[i] || `Feature ${i + 1}`}
+                            {modelInfo.features && modelInfo.features[i] || `Input ${i + 1}`}
                         </label>
-                        <input
-                            type="number"
-                            step="any"
+                        <ModelInput
+                            type={modelInfo.input_type}
                             value={value}
-                            onChange={e => {
-                                const newInputs = [...inputs];
-                                newInputs[i] = e.target.value;
-                                setInputs(newInputs);
-                            }}
-                            className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                            required
+                            onChange={(e) => handleInputChange(i, e)}
                             disabled={isSubmitting}
                         />
                     </div>
@@ -350,7 +274,7 @@ function PredictionForm({ modelInfo, onPredict, onError }) {
                     } text-white`}
                     disabled={isSubmitting}
                 >
-                    {isSubmitting ? 'Predicting...' : 'Predict'}
+                    {isSubmitting ? <LoadingSpinner /> : "Predict"}
                 </button>
             </form>
         </div>
@@ -358,7 +282,9 @@ function PredictionForm({ modelInfo, onPredict, onError }) {
 }
 
 // Prediction Results Component
-function PredictionResults({ predictions, onClear }) {
+function PredictionResults({ predictions, onClear, modelInfo }) {
+    if (!modelInfo) return null;
+
     return (
         <div className="bg-white p-6 rounded-lg shadow">
             <div className="flex justify-between items-center mb-4">
@@ -382,10 +308,16 @@ function PredictionResults({ predictions, onClear }) {
                                 <div>
                                     <div className="font-medium">Input:</div>
                                     <div className="text-sm text-gray-600">
-                                        [{pred.inputs.join(', ')}]
+                                        {modelInfo.input_type === 'numeric' 
+                                            ? `[${pred.inputs.join(', ')}]`
+                                            : pred.inputs[0]
+                                        }
                                     </div>
                                     <div className="font-medium mt-2">Prediction:</div>
-                                    <div className="text-lg">{pred.prediction}</div>
+                                    <PredictionOutput 
+                                        type={modelInfo.output_type} 
+                                        data={pred.prediction}
+                                    />
                                 </div>
                                 <div className="text-xs text-gray-500">
                                     {new Date(pred.timestamp).toLocaleTimeString()}
@@ -395,6 +327,167 @@ function PredictionResults({ predictions, onClear }) {
                     ))}
                 </div>
             )}
+        </div>
+    );
+}
+
+// Main App Component
+function App() {
+    const [modelInfo, setModelInfo] = React.useState(window.MODEL_INFO || {});
+    const [metrics, setMetrics] = React.useState({
+        requests: 0,
+        avg_latency: 0,
+    });
+    const [metricsHistory, setMetricsHistory] = React.useState([]);
+    const [predictions, setPredictions] = React.useState(() => {
+        try {
+            const savedPredictions = localStorage.getItem('mlship_predictions');
+            const savedModelType = localStorage.getItem('mlship_model_type');
+            
+            // Only restore predictions if they're from the same model type
+            if (savedPredictions && savedModelType === modelInfo.type) {
+                return JSON.parse(savedPredictions).map(pred => ({
+                    ...pred,
+                    timestamp: new Date(pred.timestamp)
+                }));
+            }
+            return [];
+        } catch (e) {
+            console.error('Error loading predictions:', e);
+            return [];
+        }
+    });
+    const [error, setError] = React.useState(null);
+    const [isLoading, setIsLoading] = React.useState(false);
+    const [lastUpdateTime, setLastUpdateTime] = React.useState(Date.now());
+
+    // Save predictions and model type to localStorage whenever they change
+    React.useEffect(() => {
+        try {
+            localStorage.setItem('mlship_predictions', JSON.stringify(predictions));
+            if (modelInfo && modelInfo.type) {
+                localStorage.setItem('mlship_model_type', modelInfo.type);
+            }
+        } catch (e) {
+            console.error('Error saving predictions:', e);
+        }
+    }, [predictions, modelInfo]);
+
+    React.useEffect(() => {
+        // Setup WebSocket for metrics
+        const ws = new WebSocket(`ws://${window.location.host}/ws/metrics`);
+        ws.onmessage = (event) => {
+            const now = Date.now();
+            if (now - lastUpdateTime >= 1000) {  // Update every second
+                const data = JSON.parse(event.data);
+                setMetrics(data);
+                setMetricsHistory(prev => {
+                    const newHistory = [...prev, {
+                        time: new Date(),
+                        ...data
+                    }].slice(-30);  // Keep last 30 data points
+                    return newHistory;
+                });
+                setLastUpdateTime(now);
+            }
+        };
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            setError('Failed to connect to metrics stream');
+        };
+        return () => ws.close();
+    }, [lastUpdateTime]);
+
+    if (isLoading) {
+        return (
+            <div className="container mx-auto px-4 py-8">
+                <header className="mb-8">
+                    <h1 className="text-4xl font-bold text-gray-800">MLship Dashboard</h1>
+                </header>
+                <LoadingSpinner />
+            </div>
+        );
+    }
+
+    if (error) {
+        return (
+            <div className="container mx-auto px-4 py-8">
+                <header className="mb-8">
+                    <h1 className="text-4xl font-bold text-gray-800">MLship Dashboard</h1>
+                </header>
+                <div className="bg-red-100 text-red-700 p-4 rounded">
+                    Error: {error}
+                </div>
+            </div>
+        );
+    }
+
+    if (!modelInfo || !modelInfo.type) {
+        return (
+            <div className="container mx-auto px-4 py-8">
+                <header className="mb-8">
+                    <h1 className="text-4xl font-bold text-gray-800">MLship Dashboard</h1>
+                </header>
+                <div className="bg-yellow-100 text-yellow-700 p-4 rounded">
+                    No model loaded. Please deploy a model first.
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="container mx-auto px-4 py-8">
+            <header className="mb-8">
+                <h1 className="text-4xl font-bold text-gray-800">MLship Dashboard</h1>
+            </header>
+
+            <div className="grid grid-cols-1 gap-6">
+                {/* Top Row: Prediction Interface */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <PredictionForm 
+                        modelInfo={modelInfo} 
+                        onPredict={(newPrediction) => {
+                            setPredictions(prev => [newPrediction, ...prev]);
+                        }}
+                        onError={setError}
+                    />
+                    <PredictionResults 
+                        predictions={predictions}
+                        onClear={() => {
+                            setPredictions([]);
+                            localStorage.removeItem('mlship_predictions');
+                        }}
+                        modelInfo={modelInfo}
+                    />
+                </div>
+
+                {/* Middle Row: Real-time Metrics */}
+                <div className="grid grid-cols-1 gap-6">
+                    <MetricsCard metrics={metrics} metricsHistory={metricsHistory} />
+                </div>
+
+                {/* Bottom Row: Model Info */}
+                <div className="grid grid-cols-1">
+                    <div className="bg-white p-6 rounded-lg shadow">
+                        <h2 className="text-2xl font-bold mb-4">Model Information</h2>
+                        <div className="space-y-2">
+                            <p><span className="font-semibold">Type:</span> {modelInfo.type}</p>
+                            <p><span className="font-semibold">Input Type:</span> {modelInfo.input_type}</p>
+                            <p><span className="font-semibold">Output Type:</span> {modelInfo.output_type}</p>
+                            {modelInfo.features && modelInfo.features.length > 0 && (
+                                <div>
+                                    <p className="font-semibold">Features:</p>
+                                    <ul className="list-disc list-inside">
+                                        {modelInfo.features.map((feature, i) => (
+                                            <li key={i}>{feature}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 }

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, Request, HTTPException
+from fastapi import FastAPI, WebSocket, Request, HTTPException, File, UploadFile, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -12,15 +12,17 @@ import uvicorn
 import signal
 import sys
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from ..utils.constants import METRICS_FILE
 from ..utils.daemon import cleanup_files
+from PIL import Image
+import io
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class PredictRequest(BaseModel):
-    inputs: List[List[float]]
+    inputs: Union[List[List[float]], List[str]]
 
 class ModelServer:
     def __init__(self, model):
@@ -100,11 +102,22 @@ class ModelServer:
             return self.get_model_info()
             
         @self.app.post("/api/predict")
-        async def predict(request: PredictRequest):
+        async def predict(request: Request):
             try:
                 start_time = time.time()
-                inputs = np.array(request.inputs)
-                predictions = self.model.predict(inputs)
+                model_info = self.get_model_info()
+                
+                if model_info["input_type"] == "image":
+                    # Handle image input
+                    form = await request.form()
+                    image_file = form["image"]
+                    contents = await image_file.read()
+                    image = Image.open(io.BytesIO(contents))
+                    predictions = self.model.predict([image])
+                else:
+                    # Handle numeric and text inputs
+                    data = await request.json()
+                    predictions = self.model.predict(data["inputs"])
                 
                 # Update metrics
                 self.request_count += 1
@@ -113,8 +126,8 @@ class ModelServer:
                 
                 # Prepare prediction response
                 prediction_data = {
-                    "inputs": request.inputs,
-                    "predictions": predictions.tolist()
+                    "inputs": data["inputs"] if model_info["input_type"] != "image" else ["<image>"],
+                    "predictions": predictions if isinstance(predictions, list) else predictions.tolist()
                 }
                 
                 # Broadcast prediction to all connected clients
@@ -163,26 +176,7 @@ class ModelServer:
         
     def get_model_info(self) -> Dict[str, Any]:
         """Extract model information for UI"""
-        model_info = {
-            "type": type(self.model).__name__,
-            "params": {},
-            "features": [],
-            "n_features": None
-        }
-        
-        # Get model parameters
-        if hasattr(self.model, "get_params"):
-            model_info["params"] = self.model.get_params()
-            
-        # Try to get feature names
-        if hasattr(self.model, "feature_names_in_"):
-            model_info["features"] = self.model.feature_names_in_.tolist()
-        
-        # Get input shape if available
-        if hasattr(self.model, "n_features_in_"):
-            model_info["n_features"] = self.model.n_features_in_
-            
-        return model_info
+        return self.model.get_model_info()
         
     def update_metrics(self):
         """Update metrics file"""

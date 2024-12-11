@@ -4,53 +4,37 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MLship Dashboard</title>
-    <link
-      href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css"
-      rel="stylesheet"
-    />
-    <script src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/babel-standalone@6/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script>
+      // Pass server-side variables to client
+      window.MODEL_INFO = {{ model_info|tojson|safe }};
+    </script>
     <style>
       .predictions-container {
         max-height: 400px;
         overflow-y: auto;
-        padding-right: 8px;
+        scrollbar-width: thin;
+        scrollbar-color: #4f46e5 #e5e7eb;
       }
-
       .predictions-container::-webkit-scrollbar {
         width: 8px;
       }
-
       .predictions-container::-webkit-scrollbar-track {
-        background: #f1f1f1;
+        background: #e5e7eb;
         border-radius: 4px;
       }
-
       .predictions-container::-webkit-scrollbar-thumb {
-        background: #888;
+        background-color: #4f46e5;
         border-radius: 4px;
-      }
-
-      .predictions-container::-webkit-scrollbar-thumb:hover {
-        background: #555;
-      }
-
-      /* For Firefox */
-      .predictions-container {
-        scrollbar-width: thin;
-        scrollbar-color: #888 #f1f1f1;
       }
     </style>
   </head>
-  <body class="bg-gray-100">
+  <body class="bg-gray-100 min-h-screen">
     <div id="root"></div>
-    <script>
-      // Pass server-side variables to client
-      window.MODEL_INFO = JSON.parse("{{ model_info|tojson|safe }}");
-      window.BASE_URL = "{{ base_url }}";
-    </script>
     <script
       type="text/babel"
       src="{{ url_for('static', path='js/app.js') }}"

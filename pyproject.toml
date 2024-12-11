@@ -1,60 +1,35 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlship"
 version = "0.1.0"
-description = "Simple ML Model Deployment"
-authors = [
-    {name = "Your Name", email = "your.email@example.com"}
-]
-readme = "README.md"
-requires-python = ">=3.8"
-classifiers = [
-    "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: OS Independent",
-]
+description = "A tool for deploying ML models"
+requires-python = ">=3.7"
 dependencies = [
-    "scikit-learn>=1.0.0",
-    "fastapi>=0.68.0",
-    "scipy>=1.6.0",
-    "psutil>=5.9.0",
-    "boto3>=1.18.0",
-    "threadpoolctl>=3.1.0",
-    "joblib>=1.2.0",
-    "click>=8.0",
-    "pydantic>=1.8.0",
-    "numpy>=1.19.5",
-    "uvicorn>=0.15.0",
-    "pyyaml>=5.4.0",
-    "jinja2>=2.11.3",
-    "python-multipart>=0.0.5",
-    "aiofiles>=0.7.0"
+    "fastapi",
+    "uvicorn",
+    "psutil",
+    "scikit-learn",
+    "numpy",
+    "joblib",
+    "boto3",
+    "python-multipart",
+    "pillow",
+    "torch",
+    "torchvision",
+    "transformers",
+    "click",
 ]
 
 [project.optional-dependencies]
 test = [
-    "pytest>=6.0",
-    "pytest-cov>=2.0",
-    "selenium>=4.0.0",
-    "requests>=2.25.0",
-    "webdriver-manager>=3.8.0"
+    "pytest",
+    "pytest-asyncio",
+    "httpx",
+    "pytest-cov",
 ]
 
 [project.scripts]
-mlship = "mlship.cli:cli"
-
-[tool.setuptools]
-package-dir = {"" = "src"}
-
-[tool.setuptools.packages.find]
-where = ["src"]
-include = ["mlship*"]
-
-[tool.setuptools.package-data]
-"mlship.ui" = [
-    "templates/*.html",
-    "static/js/*.js"
-]
+mlship = "mlship.cli:main"
