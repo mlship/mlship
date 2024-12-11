@@ -92,8 +92,8 @@ def create_test_model(output_path='test_model.pkl'):
         print(f"  Confidence: {max(proba):.3f}")
         assert pred == expected, f"Model prediction {pred} does not match expected {expected}"
     
-    # Save the model
-    joblib.dump(model, output_path)
+    # Save the model using joblib
+    joblib.dump(model, output_path, compress=3)
     print(f"Model saved successfully at: {output_path}")
     
     return output_path

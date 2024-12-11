@@ -1,244 +1,394 @@
-function ModelInfo({ modelInfo }) {
-  if (!modelInfo || modelInfo.status !== 'loaded') {
+// Get base URL from template
+const BASE_URL = window.BASE_URL || '';
+
+// Loading Component
+function LoadingSpinner() {
     return (
-      <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative">
-        {modelInfo?.error || 'No model loaded. Please deploy a model first.'}
-      </div>
+        <div className="flex items-center justify-center p-4">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+        </div>
     );
-  }
-
-  return (
-    <div className="bg-white shadow rounded-lg p-6">
-      <h2 className="text-xl font-semibold mb-4">Model Information</h2>
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <p><span className="font-medium">Type:</span> {modelInfo.type}</p>
-          <p><span className="font-medium">Input Type:</span> {modelInfo.input_type}</p>
-          <p><span className="font-medium">Output Type:</span> {modelInfo.output_type}</p>
-          <p><span className="font-medium">Features:</span> {modelInfo.features.join(', ')}</p>
-        </div>
-        <div>
-          <p><span className="font-medium">Status:</span> {modelInfo.status}</p>
-          <p><span className="font-medium">Request Count:</span> {modelInfo.request_count}</p>
-          <p><span className="font-medium">Average Latency:</span> {modelInfo.average_latency.toFixed(2)}ms</p>
-        </div>
-      </div>
-    </div>
-  );
 }
 
-function PredictionForm({ modelInfo, onPredict }) {
-  const [inputs, setInputs] = React.useState({});
-  const [error, setError] = React.useState(null);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError(null);
-
-    try {
-      const inputArray = modelInfo.features.map(feature => parseFloat(inputs[feature] || 0));
-      await onPredict(inputArray);
-      // Clear form after successful prediction
-      setInputs({});
-    } catch (err) {
-      setError(err.message);
-    }
-  };
-
-  if (!modelInfo || !modelInfo.features) return null;
-
-  return (
-    <div className="bg-white shadow rounded-lg p-6 mt-6">
-      <h2 className="text-xl font-semibold mb-4">Make Prediction</h2>
-      {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4">
-          {error}
-        </div>
-      )}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          {modelInfo.features.map(feature => (
-            <div key={feature}>
-              <label className="block text-sm font-medium text-gray-700">{feature}</label>
-              <input
-                type="number"
-                step="any"
-                value={inputs[feature] || ''}
-                onChange={e => setInputs(prev => ({ ...prev, [feature]: e.target.value }))}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                required
-              />
-            </div>
-          ))}
-        </div>
-        <button
-          type="submit"
-          className="w-full bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-        >
-          Predict
-        </button>
-      </form>
-    </div>
-  );
-}
-
-function PredictionsList({ predictions }) {
-  return (
-    <div className="bg-white shadow rounded-lg p-6 mt-6">
-      <h2 className="text-xl font-semibold mb-4">Recent Predictions</h2>
-      <div className="predictions-container">
-        {predictions.map((pred, idx) => (
-          <div key={idx} className="border-b border-gray-200 py-4 last:border-b-0">
-            <div className="flex justify-between items-start">
-              <div>
-                <strong className="text-gray-700">Input:</strong>{' '}
-                {pred.inputs.map((val, i) => (
-                  <span key={i} className="mr-2">
-                    {window.MODEL_INFO.features[i]}: {val}
-                  </span>
-                ))}
-              </div>
-              <div>
-                <strong className="text-gray-700">Prediction:</strong>{' '}
-                <span className="text-indigo-600 font-medium">{pred.prediction}</span>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function MetricsGraph({ metrics }) {
-  const graphRef = React.useRef(null);
-
-  React.useEffect(() => {
-    if (!metrics || !metrics.time || metrics.time.length === 0) return;
-
-    const traces = [
-      {
-        name: 'Requests',
-        x: metrics.time,
-        y: metrics.requests,
-        type: 'scatter',
-        yaxis: 'y1'
-      },
-      {
-        name: 'Avg Latency (ms)',
-        x: metrics.time,
-        y: metrics.latency,
-        type: 'scatter',
-        yaxis: 'y2'
-      }
-    ];
-
-    const layout = {
-      title: 'Real-time Metrics',
-      xaxis: { title: 'Time' },
-      yaxis: { 
-        title: 'Total Requests',
-        side: 'left'
-      },
-      yaxis2: {
-        title: 'Average Latency (ms)',
-        overlaying: 'y',
-        side: 'right'
-      },
-      showlegend: true,
-      legend: {
-        x: 0,
-        y: 1
-      }
-    };
-
-    Plotly.newPlot(graphRef.current, traces, layout);
-  }, [metrics]);
-
-  return (
-    <div className="bg-white shadow rounded-lg p-6 mt-6">
-      <h2 className="text-xl font-semibold mb-4">Metrics</h2>
-      <div ref={graphRef} style={{ width: '100%', height: '300px' }} />
-    </div>
-  );
-}
-
+// Main App Component
 function App() {
-  const [modelInfo, setModelInfo] = React.useState(window.MODEL_INFO);
-  const [predictions, setPredictions] = React.useState([]);
-  const [metrics, setMetrics] = React.useState({
-    time: [],
-    requests: [],
-    latency: []
-  });
+    const [modelInfo, setModelInfo] = React.useState(window.MODEL_INFO || null);
+    const [metrics, setMetrics] = React.useState(null);
+    const [metricsHistory, setMetricsHistory] = React.useState([]);
+    const [predictions, setPredictions] = React.useState(() => {
+        // Initialize predictions from localStorage
+        try {
+            const savedPredictions = localStorage.getItem('mlship_predictions');
+            return savedPredictions ? JSON.parse(savedPredictions).map(pred => ({
+                ...pred,
+                timestamp: new Date(pred.timestamp) // Convert timestamp back to Date object
+            })) : [];
+        } catch (e) {
+            console.error('Error loading predictions from localStorage:', e);
+            return [];
+        }
+    });
+    const [error, setError] = React.useState(null);
+    const [isLoading, setIsLoading] = React.useState(false);
+    const [lastUpdateTime, setLastUpdateTime] = React.useState(Date.now());
 
-  React.useEffect(() => {
-    // Set up WebSocket connection for metrics
-    const ws = new WebSocket(`ws://${window.location.host}/ws/metrics`);
-    
-    ws.onmessage = (event) => {
-      const metricsData = JSON.parse(event.data);
-      const now = new Date();
-      
-      setMetrics(prev => {
-        const newMetrics = {
-          time: [...prev.time, now],
-          requests: [...prev.requests, metricsData.requests],
-          latency: [...prev.latency, metricsData.avg_latency]
-        };
+    // Save predictions to localStorage whenever they change
+    React.useEffect(() => {
+        try {
+            localStorage.setItem('mlship_predictions', JSON.stringify(predictions));
+        } catch (e) {
+            console.error('Error saving predictions to localStorage:', e);
+        }
+    }, [predictions]);
 
-        // Keep only last 50 points
-        if (newMetrics.time.length > 50) {
-          newMetrics.time = newMetrics.time.slice(-50);
-          newMetrics.requests = newMetrics.requests.slice(-50);
-          newMetrics.latency = newMetrics.latency.slice(-50);
+    React.useEffect(() => {
+        if (!modelInfo) {
+            setIsLoading(true);
+            // Fetch model info if not provided in template
+            fetch(`${BASE_URL}/api/model/info`)
+                .then(res => res.json())
+                .then(data => {
+                    setModelInfo(data);
+                    setIsLoading(false);
+                })
+                .catch(err => {
+                    setError(err.message);
+                    setIsLoading(false);
+                });
         }
 
-        return newMetrics;
-      });
-    };
+        // Setup WebSocket for metrics
+        const wsMetrics = new WebSocket(`ws://${window.location.host}/ws/metrics`);
 
-    ws.onclose = () => {
-      setTimeout(() => {
-        window.location.reload();
-      }, 1000);
-    };
+        wsMetrics.onmessage = (event) => {
+            const now = Date.now();
+            // Only update every 2 seconds
+            if (now - lastUpdateTime >= 2000) {
+                const newMetrics = JSON.parse(event.data);
+                setMetrics(newMetrics);
+                setMetricsHistory(prev => {
+                    const newHistory = [...prev, {
+                        time: new Date(),
+                        ...newMetrics
+                    }].slice(-30); // Keep last 30 data points
+                    return newHistory;
+                });
+                setLastUpdateTime(now);
+            }
+        };
 
-    return () => ws.close();
-  }, []);
+        wsMetrics.onerror = (error) => {
+            console.error('Metrics WebSocket error:', error);
+            setError('Failed to connect to metrics stream');
+        };
 
-  const handlePredict = async (inputs) => {
-    const response = await fetch('/api/predict', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ inputs: [inputs] }),
-    });
+        return () => {
+            wsMetrics.close();
+        };
+    }, [lastUpdateTime]);
 
-    const data = await response.json();
-    if (data.error) throw new Error(data.error);
+    if (isLoading) {
+        return (
+            <div className="container mx-auto px-4 py-8">
+                <header className="mb-8">
+                    <h1 className="text-4xl font-bold text-gray-800">MLship Dashboard</h1>
+                </header>
+                <LoadingSpinner />
+            </div>
+        );
+    }
 
-    setPredictions(prev => [{
-      inputs,
-      prediction: data.predictions[0]
-    }, ...prev].slice(0, 100));  // Keep last 100 predictions
+    if (error) {
+        return (
+            <div className="container mx-auto px-4 py-8">
+                <header className="mb-8">
+                    <h1 className="text-4xl font-bold text-gray-800">MLship Dashboard</h1>
+                </header>
+                <div className="bg-red-100 text-red-700 p-4 rounded">
+                    Error: {error}
+                </div>
+            </div>
+        );
+    }
 
-    // Update model info after prediction
-    const infoResponse = await fetch('/api/model-info');
-    const newModelInfo = await infoResponse.json();
-    setModelInfo(newModelInfo);
-  };
+    return (
+        <div className="container mx-auto px-4 py-8">
+            <header className="mb-8">
+                <h1 className="text-4xl font-bold text-gray-800">MLship Dashboard</h1>
+            </header>
 
-  return (
-    <div className="container mx-auto px-4 py-8 max-w-6xl">
-      <h1 className="text-3xl font-bold text-gray-900 mb-8">MLship Dashboard</h1>
-      <ModelInfo modelInfo={modelInfo} />
-      <PredictionForm modelInfo={modelInfo} onPredict={handlePredict} />
-      <PredictionsList predictions={predictions} />
-      <MetricsGraph metrics={metrics} />
-    </div>
-  );
+            <div className="grid grid-cols-1 gap-6">
+                {/* Top Row: Prediction Interface */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <PredictionForm 
+                        modelInfo={modelInfo} 
+                        onPredict={(newPrediction) => {
+                            setPredictions(prev => [newPrediction, ...prev]);
+                        }}
+                        onError={setError}
+                    />
+                    <PredictionResults 
+                        predictions={predictions}
+                        onClear={() => {
+                            setPredictions([]);
+                            localStorage.removeItem('mlship_predictions');
+                        }}
+                    />
+                </div>
+
+                {/* Middle Row: Real-time Metrics */}
+                <div className="grid grid-cols-1 gap-6">
+                    <MetricsCard metrics={metrics} metricsHistory={metricsHistory} />
+                </div>
+
+                {/* Bottom Row: Model Info */}
+                <div className="grid grid-cols-1">
+                    <ModelInfoCard modelInfo={modelInfo} />
+                </div>
+            </div>
+        </div>
+    );
 }
 
+// Model Info Component
+function ModelInfoCard({ modelInfo }) {
+    if (!modelInfo) return <LoadingSpinner />;
+
+    return (
+        <div className="bg-white p-6 rounded-lg shadow">
+            <h2 className="text-2xl font-bold mb-4">Model Information</h2>
+            <div className="space-y-2">
+                <p><span className="font-semibold">Type:</span> {modelInfo.type}</p>
+                <p><span className="font-semibold">Input Type:</span> {modelInfo.input_type}</p>
+                <p><span className="font-semibold">Output Type:</span> {modelInfo.output_type}</p>
+                {modelInfo.features && modelInfo.features.length > 0 && (
+                    <div>
+                        <h3 className="font-semibold">Features:</h3>
+                        <ul className="list-disc list-inside">
+                            {modelInfo.features.map((feature, i) => (
+                                <li key={i}>{feature}</li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
+                {modelInfo.classes && modelInfo.classes.length > 0 && (
+                    <div>
+                        <h3 className="font-semibold">Classes:</h3>
+                        <ul className="list-disc list-inside">
+                            {modelInfo.classes.map((cls, i) => (
+                                <li key={i}>{cls}</li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// Metrics Component
+function MetricsCard({ metrics, metricsHistory }) {
+    if (!metrics) return <LoadingSpinner />;
+
+    React.useEffect(() => {
+        if (metricsHistory.length > 0) {
+            const latencyTrace = {
+                x: metricsHistory.map(m => m.time),
+                y: metricsHistory.map(m => m.avg_latency),
+                type: 'scatter',
+                name: 'Avg Latency (ms)',
+                line: { color: '#4F46E5' }
+            };
+
+            const requestsTrace = {
+                x: metricsHistory.map(m => m.time),
+                y: metricsHistory.map(m => m.requests),
+                type: 'scatter',
+                name: 'Total Requests',
+                yaxis: 'y2',
+                line: { color: '#059669' }
+            };
+
+            const layout = {
+                title: '',
+                height: 250,
+                margin: { t: 10, r: 50, l: 50, b: 30 },
+                xaxis: { title: 'Time' },
+                yaxis: { 
+                    title: 'Avg Latency (ms)',
+                    titlefont: { color: '#4F46E5' },
+                    tickfont: { color: '#4F46E5' }
+                },
+                yaxis2: {
+                    title: 'Total Requests',
+                    titlefont: { color: '#059669' },
+                    tickfont: { color: '#059669' },
+                    overlaying: 'y',
+                    side: 'right'
+                },
+                showlegend: true,
+                legend: {
+                    orientation: 'h',
+                    y: -0.2
+                }
+            };
+
+            const config = {
+                displayModeBar: false
+            };
+
+            Plotly.newPlot('metrics-chart', [latencyTrace, requestsTrace], layout, config);
+        }
+    }, [metricsHistory]);
+
+    return (
+        <div className="bg-white p-6 rounded-lg shadow">
+            <h2 className="text-2xl font-bold mb-4">Real-time Metrics</h2>
+            
+            {/* Current Values */}
+            <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="text-center">
+                    <p className="text-gray-600">Requests</p>
+                    <p className="text-2xl font-bold">{metrics.requests}</p>
+                </div>
+                <div className="text-center">
+                    <p className="text-gray-600">Avg Latency</p>
+                    <p className="text-2xl font-bold">{metrics.avg_latency}ms</p>
+                </div>
+            </div>
+
+            {/* Metrics Chart */}
+            <div id="metrics-chart" className="w-full"></div>
+        </div>
+    );
+}
+
+// Prediction Form Component
+function PredictionForm({ modelInfo, onPredict, onError }) {
+    if (!modelInfo) return null;
+
+    const [inputs, setInputs] = React.useState(['', '']);
+    const [isSubmitting, setIsSubmitting] = React.useState(false);
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setIsSubmitting(true);
+        try {
+            const response = await fetch(`${BASE_URL}/api/model/predict`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    inputs: inputs.map(Number)
+                })
+            });
+            const data = await response.json();
+            if (response.ok) {
+                onPredict({
+                    inputs: inputs.map(Number),
+                    prediction: data.prediction,
+                    timestamp: new Date()
+                });
+                // Clear inputs after successful prediction
+                setInputs(['', '']);
+            } else {
+                onError(data.detail || 'Prediction failed');
+            }
+        } catch (err) {
+            onError(err.message);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    return (
+        <div className="bg-white p-6 rounded-lg shadow">
+            <h2 className="text-2xl font-bold mb-4">Make Prediction</h2>
+            <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                        First Number
+                    </label>
+                    <input
+                        type="number"
+                        step="any"
+                        value={inputs[0]}
+                        onChange={e => setInputs([e.target.value, inputs[1]])}
+                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                        required
+                        disabled={isSubmitting}
+                    />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                        Second Number
+                    </label>
+                    <input
+                        type="number"
+                        step="any"
+                        value={inputs[1]}
+                        onChange={e => setInputs([inputs[0], e.target.value])}
+                        className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
+                        required
+                        disabled={isSubmitting}
+                    />
+                </div>
+                <button
+                    type="submit"
+                    className={`w-full py-2 px-4 rounded ${
+                        isSubmitting
+                            ? 'bg-indigo-400 cursor-not-allowed'
+                            : 'bg-indigo-600 hover:bg-indigo-700'
+                    } text-white`}
+                    disabled={isSubmitting}
+                >
+                    {isSubmitting ? 'Predicting...' : 'Predict'}
+                </button>
+            </form>
+        </div>
+    );
+}
+
+// Prediction Results Component
+function PredictionResults({ predictions, onClear }) {
+    return (
+        <div className="bg-white p-6 rounded-lg shadow">
+            <div className="flex justify-between items-center mb-4">
+                <h2 className="text-2xl font-bold">Prediction History</h2>
+                {predictions.length > 0 && (
+                    <button
+                        onClick={onClear}
+                        className="text-sm text-red-600 hover:text-red-800"
+                    >
+                        Clear History
+                    </button>
+                )}
+            </div>
+            {predictions.length === 0 ? (
+                <p className="text-gray-500">Make a prediction to see results</p>
+            ) : (
+                <div className="predictions-container">
+                    {predictions.map((pred, i) => (
+                        <div key={i} className="p-4 bg-gray-50 rounded border border-gray-200 mb-2">
+                            <div className="flex justify-between items-start">
+                                <div>
+                                    <div className="font-medium">Input:</div>
+                                    <div className="text-sm text-gray-600">
+                                        [{pred.inputs.join(', ')}]
+                                    </div>
+                                    <div className="font-medium mt-2">Prediction:</div>
+                                    <div className="text-lg">{pred.prediction}</div>
+                                </div>
+                                <div className="text-xs text-gray-500">
+                                    {new Date(pred.timestamp).toLocaleTimeString()}
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+// Render the App
 ReactDOM.render(<App />, document.getElementById('root')); 
