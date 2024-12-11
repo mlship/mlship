@@ -1,225 +1,212 @@
-from fastapi import FastAPI, WebSocket, Request, HTTPException, File, UploadFile, Form
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel
-import numpy as np
+import os
 import json
-import time
 import asyncio
-import logging
-import uvicorn
 import signal
 import sys
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Union
-from ..utils.constants import METRICS_FILE
+import numpy as np
 from ..utils.daemon import cleanup_files
-from PIL import Image
-import io
+from ..models.wrapper import ModelWrapper
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Create FastAPI app
+app = FastAPI()
 
-class PredictRequest(BaseModel):
-    inputs: Union[List[List[float]], List[str]]
+# Get the directory containing this file
+current_dir = Path(__file__).parent.resolve()
+ui_dir = current_dir.parent / "ui"  # Changed to look in the correct location
 
-class ModelServer:
-    def __init__(self, model):
-        self.model = model
-        self.app = FastAPI(debug=True)
-        self.metrics_connections: List[WebSocket] = []
-        self.prediction_connections: List[WebSocket] = []
-        self.request_count = 0
-        self.total_latency = 0
-        self.start_time = time.time()
-        self.should_exit = False
-        
-        # Set up signal handlers
-        signal.signal(signal.SIGINT, self.signal_handler)
-        signal.signal(signal.SIGTERM, self.signal_handler)
-        
-        # Set up static files and templates
-        self.setup_static_files()
-        self.setup_routes()
-        
-    async def broadcast_prediction(self, prediction_data: dict):
-        """Broadcast prediction to all connected clients"""
-        for connection in self.prediction_connections:
-            try:
-                await connection.send_json(prediction_data)
-            except Exception as e:
-                logger.error(f"Error broadcasting prediction: {str(e)}")
-                
-    def setup_static_files(self):
-        """Set up static files and templates with proper paths"""
-        try:
-            # Get the package root directory
-            package_dir = Path(__file__).parent.parent
-            
-            # Set up paths
-            static_dir = package_dir / "ui" / "static"
-            template_dir = package_dir / "ui" / "templates"
-            
-            logger.info(f"Static directory: {static_dir} (exists: {static_dir.exists()})")
-            logger.info(f"Template directory: {template_dir} (exists: {template_dir.exists()})")
-            
-            # Mount static files
-            self.app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-            self.templates = Jinja2Templates(directory=str(template_dir))
-            
-        except Exception as e:
-            logger.error(f"Error setting up static files: {str(e)}")
-            raise
-        
-    def setup_routes(self):
-        @self.app.get("/")
-        async def redirect_to_ui():
-            from fastapi.responses import RedirectResponse
-            return RedirectResponse(url="/ui")
-            
-        @self.app.get("/ui", response_class=HTMLResponse)
-        async def ui(request: Request):
-            try:
-                logger.info(f"Serving UI template for request: {request.url}")
-                model_info = self.get_model_info()
-                logger.info(f"Model info: {model_info}")
-                
-                return self.templates.TemplateResponse(
-                    "index.html",
-                    {
-                        "request": request,
-                        "model_info": model_info,
-                        "base_url": str(request.base_url).rstrip('/')
-                    }
-                )
-            except Exception as e:
-                logger.error(f"Error serving UI template: {str(e)}", exc_info=True)
-                raise HTTPException(status_code=500, detail=str(e))
-            
-        @self.app.get("/api/model-info")
-        def model_info():
-            return self.get_model_info()
-            
-        @self.app.post("/api/predict")
-        async def predict(request: Request):
-            try:
-                start_time = time.time()
-                model_info = self.get_model_info()
-                
-                if model_info["input_type"] == "image":
-                    # Handle image input
-                    form = await request.form()
-                    image_file = form["image"]
-                    contents = await image_file.read()
-                    image = Image.open(io.BytesIO(contents))
-                    predictions = self.model.predict([image])
-                else:
-                    # Handle numeric and text inputs
-                    data = await request.json()
-                    predictions = self.model.predict(data["inputs"])
-                
-                # Update metrics
-                self.request_count += 1
-                self.total_latency += (time.time() - start_time) * 1000
-                self.update_metrics()
-                
-                # Prepare prediction response
-                prediction_data = {
-                    "inputs": data["inputs"] if model_info["input_type"] != "image" else ["<image>"],
-                    "predictions": predictions if isinstance(predictions, list) else predictions.tolist()
-                }
-                
-                # Broadcast prediction to all connected clients
-                await self.broadcast_prediction(prediction_data)
-                
-                return prediction_data
-            except Exception as e:
-                logger.error(f"Prediction error: {str(e)}")
-                raise HTTPException(status_code=500, detail=str(e))
-        
-        @self.app.get("/health")
-        def health():
-            return {"status": "healthy"}
-            
-        @self.app.websocket("/ws/metrics")
-        async def metrics_websocket(websocket: WebSocket):
-            await websocket.accept()
-            self.metrics_connections.append(websocket)
-            try:
-                while True:
-                    # Send metrics updates every second
-                    metrics = {
-                        'start_time': self.start_time,
-                        'requests': self.request_count,
-                        'avg_latency': round(self.total_latency / max(1, self.request_count), 2)
-                    }
-                    await websocket.send_json(metrics)
-                    await asyncio.sleep(1)
-            except Exception as e:
-                logger.error(f"Metrics WebSocket error: {str(e)}")
-            finally:
-                self.metrics_connections.remove(websocket)
+# Mount static files
+app.mount("/static", StaticFiles(directory=str(ui_dir / "static")), name="static")
 
-        @self.app.websocket("/ws/predictions")
-        async def predictions_websocket(websocket: WebSocket):
-            await websocket.accept()
-            self.prediction_connections.append(websocket)
-            try:
-                while True:
-                    # Keep connection alive
-                    await asyncio.sleep(1)
-            except Exception as e:
-                logger.error(f"Predictions WebSocket error: {str(e)}")
-            finally:
-                self.prediction_connections.remove(websocket)
-        
-    def get_model_info(self) -> Dict[str, Any]:
-        """Extract model information for UI"""
-        return self.model.get_model_info()
-        
-    def update_metrics(self):
-        """Update metrics file"""
-        metrics = {
-            'start_time': self.start_time,
-            'requests': self.request_count,
-            'avg_latency': round(self.total_latency / max(1, self.request_count), 2)
+# Setup templates
+templates = Jinja2Templates(directory=str(ui_dir / "templates"))
+
+# Global model instance and settings
+model = None
+enable_ui = True  # Enable UI by default
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals"""
+    print("\nShutting down server...")
+    cleanup_files()
+    sys.exit(0)
+
+def get_model_info():
+    """Get information about the loaded model."""
+    global model
+    
+    if model is None:
+        return {
+            "error": "No model loaded. Please deploy a model first.",
+            "status": "not_loaded",
+            "type": None
         }
-        with open(METRICS_FILE, 'w') as f:
-            json.dump(metrics, f)
-            
-    def signal_handler(self, signum, frame):
-        """Handle shutdown signals"""
-        logger.info("Received shutdown signal")
-        self.should_exit = True
-        cleanup_files()
-        sys.exit(0)
-            
-    def serve(self, host="0.0.0.0", port=8000):
-        """Start the server with proper signal handling"""
-        logger.info(f"Starting server on {host}:{port}")
+    
+    try:
+        info = model.get_model_info()
+        info["status"] = "loaded"
+        info["request_count"] = model.request_count
+        info["average_latency"] = model.average_latency
         
-        # Configure uvicorn with proper signal handling
-        config = uvicorn.Config(
-            app=self.app,
-            host=host,
-            port=port,
-            log_level="debug",
-            loop="asyncio",
-            reload=False,
-            workers=1
+        # Ensure required fields are present
+        if "type" not in info:
+            info["type"] = model.model_type
+        if "input_type" not in info:
+            info["input_type"] = model.input_type
+        if "output_type" not in info:
+            info["output_type"] = model.output_type
+        if "features" not in info and hasattr(model, "feature_names"):
+            info["features"] = model.feature_names
+        
+        return info
+    except Exception as e:
+        print(f"Error getting model info: {str(e)}")
+        return {
+            "error": str(e),
+            "status": "error",
+            "type": None
+        }
+
+@app.get("/")
+async def root():
+    """Redirect to UI if enabled, otherwise show API info"""
+    if enable_ui:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/ui")
+    return {"message": "MLShip API Server", "ui_enabled": enable_ui}
+
+@app.get("/ui", response_class=HTMLResponse)
+async def get_ui(request: Request):
+    """Serve the UI page."""
+    if not enable_ui:
+        return JSONResponse(
+            status_code=404,
+            content={"error": "UI not enabled. Please run with --ui flag"}
         )
+    
+    try:
+        model_info = get_model_info()
+        return templates.TemplateResponse(
+            "index.html",
+            {
+                "request": request,
+                "model_info": json.dumps(model_info)
+            }
+        )
+    except Exception as e:
+        print(f"Error serving UI: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+@app.get("/api/model-info")
+async def get_model_info_api():
+    """Get information about the loaded model."""
+    return get_model_info()
+
+@app.post("/api/predict")
+async def predict(request: Request):
+    """Make a prediction with the loaded model."""
+    if model is None:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "No model loaded"}
+        )
+    
+    try:
+        # Get request data
+        data = await request.json()
+        inputs = data.get("inputs", [])
         
-        server = uvicorn.Server(config)
-        server.install_signal_handlers = lambda: None  # Disable uvicorn's signal handlers
+        # Convert inputs to numpy array
+        inputs_array = np.array(inputs)
         
-        try:
-            server.run()
-        except KeyboardInterrupt:
-            logger.info("Received keyboard interrupt")
-            cleanup_files()
-            sys.exit(0)
-        except Exception as e:
-            logger.error(f"Server error: {str(e)}")
-            cleanup_files()
-            sys.exit(1)
+        # Make prediction
+        predictions = model.predict(inputs_array)
+        
+        # Convert predictions to list if needed
+        if isinstance(predictions, np.ndarray):
+            predictions = predictions.tolist()
+        
+        return {
+            "predictions": predictions if isinstance(predictions, list) else [predictions]
+        }
+    except Exception as e:
+        return JSONResponse(
+            status_code=400,
+            content={"error": str(e)}
+        )
+
+@app.websocket("/ws/metrics")
+async def websocket_metrics(websocket: WebSocket):
+    """WebSocket endpoint for real-time metrics."""
+    await websocket.accept()
+    try:
+        while True:
+            # Get current metrics
+            metrics = {
+                "requests": model.request_count if model else 0,
+                "avg_latency": round(model.average_latency, 2) if model else 0
+            }
+            await websocket.send_json(metrics)
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        pass
+
+def load_model(model_path: str):
+    """Load a model from the given path."""
+    global model
+    try:
+        from ..server.loader import ModelLoader
+        
+        # First load the raw model
+        raw_model = ModelLoader.load(model_path)
+        
+        # Create model wrapper
+        model = ModelWrapper.from_model(raw_model)
+        
+        # Get and print model info
+        model_info = get_model_info()
+        print(f"Model loaded successfully: {model_info}")
+        return model_info
+    except Exception as e:
+        print(f"Error loading model: {str(e)}")
+        raise
+
+def start_server(model_path: str, host: str = "127.0.0.1", port: int = 8000, ui: bool = True):
+    """Start the server with the given model."""
+    import uvicorn
+    global enable_ui, model
+    
+    # Set up signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # Enable UI if requested
+    enable_ui = ui
+    print(f"UI {'enabled' if ui else 'disabled'}")
+    
+    # Load model first
+    try:
+        model_info = load_model(model_path)
+        print(f"Starting server with model: {model_info}")
+    except Exception as e:
+        print(f"Failed to load model: {str(e)}")
+        raise
+    
+    # Configure and start uvicorn
+    config = uvicorn.Config(
+        app=app,
+        host=host,
+        port=port,
+        log_level="info",
+        loop="asyncio"
+    )
+    server = uvicorn.Server(config)
+    server.install_signal_handlers = lambda: None  # Disable uvicorn's signal handlers
+    server.run()

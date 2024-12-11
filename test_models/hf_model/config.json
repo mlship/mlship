@@ -1,0 +1,1 @@
+{"architectures": ["SimpleClassifier"], "model_type": "simple", "num_labels": 2, "id2label": {"0": "first_larger", "1": "second_larger"}}

@@ -1,222 +1,124 @@
-#!/usr/bin/env python3
-
 import os
 import numpy as np
-from sklearn.linear_model import LinearRegression
+import torch
+import tensorflow as tf
+import onnx
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import LabelEncoder
 import joblib
+import xgboost as xgb
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import json
 from pathlib import Path
-import logging
-import torch
-import torch.nn as nn
-from transformers import pipeline, AutoModelForSequenceClassification, AutoTokenizer
-from PIL import Image
-import io
-from mlship.models.wrapper import ModelWrapper
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+class SimpleNet(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear1 = torch.nn.Linear(2, 10)
+        self.linear2 = torch.nn.Linear(10, 1)
+        
+    def forward(self, x):
+        x = torch.relu(self.linear1(x))
+        return torch.sigmoid(self.linear2(x))
 
-def create_numeric_regression_model():
-    """Create a simple numeric regression model"""
-    try:
-        logger.info("Generating data for regression model...")
-        X = np.random.rand(100, 2)
-        y = 2 * X[:, 0] + 3 * X[:, 1] + np.random.randn(100) * 0.1
-        
-        logger.info("Training regression model...")
-        model = LinearRegression()
-        model.fit(X, y)
-        
-        # Wrap the model
-        wrapped_model = ModelWrapper(
-            model=model,
-            model_type="NumericRegression",
-            input_type="numeric",
-            output_type="numeric",
-            feature_names=['x1', 'x2']
-        )
-        
-        logger.info("Saving regression model...")
-        save_path = Path('models/numeric/regression.joblib')
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(wrapped_model, save_path)
-        logger.info(f"Created regression model at {save_path}")
-        
-        # Test the model
-        test_model = joblib.load(save_path)
-        test_pred = test_model.predict([[0.5, 0.5]])
-        logger.info(f"Test prediction: {test_pred}")
-        
-    except Exception as e:
-        logger.error(f"Error creating regression model: {str(e)}", exc_info=True)
-        raise
+def create_test_models(output_dir='test_models'):
+    """Create test models in different formats."""
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Create training data
+    np.random.seed(42)
+    X = np.random.rand(1000, 2)
+    y = (X[:, 1] > X[:, 0]).astype(int)
+    
+    # 1. Scikit-learn model
+    print("Creating scikit-learn model...")
+    sklearn_model = RandomForestClassifier(n_estimators=10, random_state=42)
+    sklearn_model.fit(X, y)
+    sklearn_model.feature_names_in_ = np.array(['first_number', 'second_number'])
+    joblib.dump(sklearn_model, os.path.join(output_dir, 'model.joblib'))
+    
+    # 2. PyTorch model
+    print("Creating PyTorch model...")
+    torch_model = SimpleNet()
+    torch_model.train()
+    optimizer = torch.optim.Adam(torch_model.parameters())
+    criterion = torch.nn.BCELoss()
+    
+    X_tensor = torch.FloatTensor(X)
+    y_tensor = torch.FloatTensor(y).reshape(-1, 1)
+    
+    for _ in range(100):
+        optimizer.zero_grad()
+        output = torch_model(X_tensor)
+        loss = criterion(output, y_tensor)
+        loss.backward()
+        optimizer.step()
+    
+    torch.save(torch_model, os.path.join(output_dir, 'model.pt'))
+    
+    # Save as safetensors
+    from safetensors.torch import save_file
+    state_dict = torch_model.state_dict()
+    save_file(state_dict, os.path.join(output_dir, 'model.safetensors'))
+    
+    # 3. TensorFlow model
+    print("Creating TensorFlow model...")
+    tf_model = tf.keras.Sequential([
+        tf.keras.layers.Dense(10, activation='relu', input_shape=(2,)),
+        tf.keras.layers.Dense(1, activation='sigmoid')
+    ])
+    
+    tf_model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+    tf_model.fit(X, y, epochs=10, verbose=0)
+    tf_model.save(os.path.join(output_dir, 'model.h5'))
+    
+    # Save as SavedModel
+    tf.saved_model.save(tf_model, os.path.join(output_dir, 'saved_model'))
+    
+    # Convert to TFLite
+    converter = tf.lite.TFLiteConverter.from_keras_model(tf_model)
+    tflite_model = converter.convert()
+    with open(os.path.join(output_dir, 'model.tflite'), 'wb') as f:
+        f.write(tflite_model)
+    
+    # 4. ONNX model
+    print("Creating ONNX model...")
+    dummy_input = torch.randn(1, 2)
+    torch.onnx.export(torch_model, dummy_input, os.path.join(output_dir, 'model.onnx'))
+    
+    # 5. XGBoost model
+    print("Creating XGBoost model...")
+    dtrain = xgb.DMatrix(X, label=y)
+    params = {
+        'max_depth': 3,
+        'objective': 'binary:logistic',
+        'eval_metric': 'logloss'
+    }
+    xgb_model = xgb.train(params, dtrain, num_boost_round=10)
+    xgb_model.save_model(os.path.join(output_dir, 'model.model'))
+    
+    # 6. Hugging Face model
+    print("Creating Hugging Face model...")
+    hf_model_path = os.path.join(output_dir, 'hf_model')
+    os.makedirs(hf_model_path, exist_ok=True)
+    
+    # Create a simple config
+    config = {
+        "architectures": ["SimpleClassifier"],
+        "model_type": "simple",
+        "num_labels": 2,
+        "id2label": {0: "first_larger", 1: "second_larger"}
+    }
+    
+    with open(os.path.join(hf_model_path, 'config.json'), 'w') as f:
+        json.dump(config, f)
+    
+    # Save PyTorch model as Hugging Face model
+    torch.save(torch_model.state_dict(), os.path.join(hf_model_path, 'pytorch_model.bin'))
+    
+    print("\nTest models created successfully in directory:", output_dir)
+    print("\nAvailable models:")
+    for model_file in os.listdir(output_dir):
+        print(f"- {model_file}")
 
-def create_numeric_classification_model():
-    """Create a simple numeric classification model"""
-    try:
-        logger.info("Generating data for classification model...")
-        X = np.random.rand(100, 2)
-        y = (X[:, 0] + X[:, 1] > 1).astype(int)
-        
-        logger.info("Training classification model...")
-        model = RandomForestClassifier(n_estimators=10)
-        model.fit(X, y)
-        
-        # Wrap the model
-        wrapped_model = ModelWrapper(
-            model=model,
-            model_type="NumericClassification",
-            input_type="numeric",
-            output_type="label",
-            feature_names=['x1', 'x2'],
-            classes=[0, 1]
-        )
-        
-        logger.info("Saving classification model...")
-        save_path = Path('models/numeric/classification.joblib')
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(wrapped_model, save_path)
-        logger.info(f"Created classification model at {save_path}")
-        
-        # Test the model
-        test_model = joblib.load(save_path)
-        test_pred = test_model.predict([[0.5, 0.5]])
-        logger.info(f"Test prediction: {test_pred}")
-        
-    except Exception as e:
-        logger.error(f"Error creating classification model: {str(e)}", exc_info=True)
-        raise
-
-def create_text_sentiment_model():
-    """Create a text sentiment analysis model"""
-    try:
-        logger.info("Loading text sentiment model...")
-        sentiment = pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
-        
-        # Wrap the model
-        wrapped_model = ModelWrapper(
-            model=sentiment,
-            model_type="TextSentiment",
-            input_type="text",
-            output_type="label",
-            feature_names=["text"]
-        )
-        
-        logger.info("Saving sentiment model...")
-        save_path = Path('models/text/sentiment.joblib')
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(wrapped_model, save_path)
-        logger.info(f"Created sentiment model at {save_path}")
-        
-        # Test the model
-        test_model = joblib.load(save_path)
-        test_pred = test_model.predict(["This is a great day!"])
-        logger.info(f"Test prediction: {test_pred}")
-        
-    except Exception as e:
-        logger.error(f"Error creating sentiment model: {str(e)}", exc_info=True)
-        raise
-
-def create_text_generation_model():
-    """Create a text generation model"""
-    try:
-        logger.info("Loading text generation model...")
-        generator = pipeline("text-generation", model="gpt2")
-        
-        # Wrap the model
-        wrapped_model = ModelWrapper(
-            model=generator,
-            model_type="TextGeneration",
-            input_type="text",
-            output_type="text",
-            feature_names=["prompt"]
-        )
-        
-        logger.info("Saving generation model...")
-        save_path = Path('models/text/generator.joblib')
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(wrapped_model, save_path)
-        logger.info(f"Created generation model at {save_path}")
-        
-        # Test the model
-        test_model = joblib.load(save_path)
-        test_pred = test_model.predict(["Once upon a time"])
-        logger.info(f"Test prediction: {test_pred}")
-        
-    except Exception as e:
-        logger.error(f"Error creating generation model: {str(e)}", exc_info=True)
-        raise
-
-def create_image_classification_model():
-    """Create an image classification model"""
-    try:
-        logger.info("Loading image classification model...")
-        classifier = pipeline("image-classification", model="google/vit-base-patch16-224")
-        
-        # Wrap the model
-        wrapped_model = ModelWrapper(
-            model=classifier,
-            model_type="ImageClassification",
-            input_type="image",
-            output_type="label",
-            feature_names=["image"]
-        )
-        
-        logger.info("Saving classification model...")
-        save_path = Path('models/image/classifier.joblib')
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(wrapped_model, save_path)
-        logger.info(f"Created image classification model at {save_path}")
-        
-    except Exception as e:
-        logger.error(f"Error creating image classification model: {str(e)}", exc_info=True)
-        raise
-
-def main():
-    """Create all test models"""
-    try:
-        logger.info("Starting test model creation...")
-        current_dir = Path.cwd()
-        logger.info(f"Current working directory: {current_dir}")
-        
-        models_dir = current_dir / 'models'
-        logger.info(f"Models will be saved in: {models_dir}")
-        
-        # Create models
-        logger.info("\nCreating numeric regression model...")
-        create_numeric_regression_model()
-        
-        logger.info("\nCreating numeric classification model...")
-        create_numeric_classification_model()
-        
-        logger.info("\nCreating text sentiment model...")
-        create_text_sentiment_model()
-        
-        logger.info("\nCreating text generation model...")
-        create_text_generation_model()
-        
-        logger.info("\nCreating image classification model...")
-        create_image_classification_model()
-        
-        logger.info("\nAll models created successfully!")
-        
-        # List created models
-        logger.info("\nCreated models:")
-        for model_path in Path('models').rglob('*.joblib'):
-            model = joblib.load(model_path)
-            info = model.get_model_info()
-            logger.info(f"\n- {model_path}:")
-            logger.info(f"  Type: {info['type']}")
-            logger.info(f"  Input: {info['input_type']}")
-            logger.info(f"  Output: {info['output_type']}")
-            
-    except Exception as e:
-        logger.error(f"Error in main: {str(e)}", exc_info=True)
-        raise
-
-if __name__ == "__main__":
-    main() 
+if __name__ == '__main__':
+    create_test_models() 

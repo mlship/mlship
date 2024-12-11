@@ -19,7 +19,13 @@ dependencies = [
     "pillow",
     "torch",
     "torchvision",
+    "tensorflow",
+    "tensorflow-hub",
     "transformers",
+    "onnx",
+    "onnxruntime",
+    "xgboost",
+    "safetensors",
     "click",
 ]
 

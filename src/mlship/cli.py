@@ -10,7 +10,7 @@ import signal
 from pathlib import Path
 from .utils.constants import PID_FILE, METRICS_FILE, LOG_FILE, CONFIG_FILE
 from .server.loader import ModelLoader
-from .server.app import ModelServer
+from .server import start_server
 from .utils.daemon import cleanup_files
 
 logging.basicConfig(level=logging.INFO)
@@ -174,9 +174,6 @@ def deploy(model_path, daemon, port, ui, foreground):
         else:
             # Run in foreground
             try:
-                model = ModelLoader.load(model_path)
-                server = ModelServer(model)
-                
                 # Save PID and initialize metrics
                 write_pid_file()
                 with open(METRICS_FILE, 'w') as f:
@@ -191,7 +188,7 @@ def deploy(model_path, daemon, port, ui, foreground):
                     if ui:
                         click.echo(f"🎨 UI: http://localhost:{port}/ui")
                         
-                server.serve(host="0.0.0.0", port=port)
+                start_server(model_path, host="0.0.0.0", port=port, ui=ui)
             except Exception as e:
                 cleanup_files()
                 raise click.ClickException(str(e))
