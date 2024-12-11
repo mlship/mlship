@@ -4,6 +4,7 @@ import atexit
 import signal
 import logging
 import json
+import platform
 from pathlib import Path
 from .constants import PID_FILE, LOG_FILE, METRICS_FILE
 
@@ -22,6 +23,59 @@ def cleanup_files():
 def daemonize(model_path: str, host: str, port: int, ui: bool):
     """Daemonize the server process."""
     try:
+        # For macOS, use subprocess instead of fork
+        if platform.system() == 'Darwin':
+            import subprocess
+            import psutil
+            
+            # Get the path to the current Python executable
+            python_path = sys.executable
+            
+            # Prepare command to run the server
+            cmd = [
+                python_path,
+                "-c",
+                f"""
+import os
+import logging
+from mlship.server.app import start_server
+from mlship.utils.constants import PID_FILE, LOG_FILE
+
+# Configure logging
+logging.basicConfig(
+    filename='{LOG_FILE}',
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# Write PID file
+with open('{PID_FILE}', 'w') as f:
+    f.write(str(os.getpid()))
+
+# Start server
+start_server('{model_path}', host='{host}', port={port}, ui={ui})
+                """
+            ]
+            
+            # Start process
+            with open(LOG_FILE, 'a') as log_file:
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True
+                )
+            
+            # Give the process time to start
+            try:
+                psutil.Process(process.pid).wait(timeout=1)
+            except psutil.TimeoutExpired:
+                # Process is still running, which is good
+                pass
+            
+            return
+            
+        # For other platforms, use traditional fork
         # First fork (detaches from parent)
         try:
             pid = os.fork()

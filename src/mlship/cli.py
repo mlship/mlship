@@ -35,7 +35,7 @@ def cli():
 @click.option('--host', default='0.0.0.0', help='Host to bind to')
 @click.option('--port', default=8000, help='Port to bind to')
 @click.option('--ui/--no-ui', default=True, help='Enable/disable web interface')
-@click.option('--daemon/--no-daemon', default=True, help='Run in daemon mode')
+@click.option('--daemon', is_flag=True, help='Run in daemon mode')
 def deploy(model_path, host, port, ui, daemon):
     """Deploy a model as a REST API.
     
@@ -44,10 +44,10 @@ def deploy(model_path, host, port, ui, daemon):
     
     Examples:
     \b
-    mlship deploy model.joblib
-    mlship deploy model.pkl --port 8080
-    mlship deploy model.h5 --no-ui
-    mlship deploy model.pt --no-daemon
+    mlship deploy model.joblib                # Run in foreground
+    mlship deploy model.pkl --port 8080       # Custom port
+    mlship deploy model.h5 --no-ui            # Disable UI
+    mlship deploy model.pt --daemon           # Run in background
     """
     try:
         # Check if server is already running
