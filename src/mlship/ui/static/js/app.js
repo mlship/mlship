@@ -118,12 +118,7 @@ function App() {
             </header>
 
             <div className="grid grid-cols-1 gap-6">
-                {/* Top Row: Model Info */}
-                <div className="grid grid-cols-1">
-                    <ModelInfoCard modelInfo={modelInfo} />
-                </div>
-
-                {/* Middle Row: Prediction Interface */}
+                {/* Top Row: Prediction Interface */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <PredictionForm 
                         modelInfo={modelInfo} 
@@ -141,9 +136,14 @@ function App() {
                     />
                 </div>
 
-                {/* Bottom Row: Real-time Metrics */}
+                {/* Middle Row: Real-time Metrics */}
                 <div className="grid grid-cols-1 gap-6">
                     <MetricsCard metrics={metrics} metricsHistory={metricsHistory} />
+                </div>
+
+                {/* Bottom Row: Model Info */}
+                <div className="grid grid-cols-1">
+                    <ModelInfoCard modelInfo={modelInfo} />
                 </div>
             </div>
         </div>
