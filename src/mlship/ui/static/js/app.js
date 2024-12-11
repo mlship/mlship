@@ -21,7 +21,7 @@ function App() {
             const savedPredictions = localStorage.getItem('mlship_predictions');
             return savedPredictions ? JSON.parse(savedPredictions).map(pred => ({
                 ...pred,
-                timestamp: new Date(pred.timestamp) // Convert timestamp back to Date object
+                timestamp: new Date(pred.timestamp)
             })) : [];
         } catch (e) {
             console.error('Error loading predictions from localStorage:', e);
@@ -118,7 +118,12 @@ function App() {
             </header>
 
             <div className="grid grid-cols-1 gap-6">
-                {/* Top Row: Prediction Interface */}
+                {/* Top Row: Model Info */}
+                <div className="grid grid-cols-1">
+                    <ModelInfoCard modelInfo={modelInfo} />
+                </div>
+
+                {/* Middle Row: Prediction Interface */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <PredictionForm 
                         modelInfo={modelInfo} 
@@ -136,14 +141,9 @@ function App() {
                     />
                 </div>
 
-                {/* Middle Row: Real-time Metrics */}
+                {/* Bottom Row: Real-time Metrics */}
                 <div className="grid grid-cols-1 gap-6">
                     <MetricsCard metrics={metrics} metricsHistory={metricsHistory} />
-                </div>
-
-                {/* Bottom Row: Model Info */}
-                <div className="grid grid-cols-1">
-                    <ModelInfoCard modelInfo={modelInfo} />
                 </div>
             </div>
         </div>
@@ -157,30 +157,35 @@ function ModelInfoCard({ modelInfo }) {
     return (
         <div className="bg-white p-6 rounded-lg shadow">
             <h2 className="text-2xl font-bold mb-4">Model Information</h2>
-            <div className="space-y-2">
-                <p><span className="font-semibold">Type:</span> {modelInfo.type}</p>
-                <p><span className="font-semibold">Input Type:</span> {modelInfo.input_type}</p>
-                <p><span className="font-semibold">Output Type:</span> {modelInfo.output_type}</p>
-                {modelInfo.features && modelInfo.features.length > 0 && (
-                    <div>
-                        <h3 className="font-semibold">Features:</h3>
-                        <ul className="list-disc list-inside">
-                            {modelInfo.features.map((feature, i) => (
-                                <li key={i}>{feature}</li>
-                            ))}
-                        </ul>
-                    </div>
-                )}
-                {modelInfo.classes && modelInfo.classes.length > 0 && (
-                    <div>
-                        <h3 className="font-semibold">Classes:</h3>
-                        <ul className="list-disc list-inside">
-                            {modelInfo.classes.map((cls, i) => (
-                                <li key={i}>{cls}</li>
-                            ))}
-                        </ul>
-                    </div>
-                )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-2">
+                    <p><span className="font-semibold">Type:</span> {modelInfo.type}</p>
+                    <p><span className="font-semibold">Framework:</span> {modelInfo.framework}</p>
+                    <p><span className="font-semibold">Input Type:</span> {modelInfo.input_type}</p>
+                    <p><span className="font-semibold">Output Type:</span> {modelInfo.output_type}</p>
+                </div>
+                <div className="space-y-2">
+                    {modelInfo.features && modelInfo.features.length > 0 && (
+                        <div>
+                            <h3 className="font-semibold">Features:</h3>
+                            <ul className="list-disc list-inside">
+                                {modelInfo.features.map((feature, i) => (
+                                    <li key={i}>{feature}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                    {modelInfo.classes && modelInfo.classes.length > 0 && (
+                        <div>
+                            <h3 className="font-semibold">Classes:</h3>
+                            <ul className="list-disc list-inside">
+                                {modelInfo.classes.map((cls, i) => (
+                                    <li key={i}>{cls}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                </div>
             </div>
         </div>
     );
