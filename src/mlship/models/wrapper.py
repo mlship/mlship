@@ -24,6 +24,7 @@ class ModelWrapper:
         self.request_count = 0
         self.total_latency = 0
         self.average_latency = 0
+        self.start_time = time.time()  # Add start time for uptime tracking
 
     def load_model(self, model_path: str) -> None:
         """Load a model from a file path, supporting multiple formats."""
@@ -304,6 +305,9 @@ class ModelWrapper:
         if self.model is None:
             raise ValueError("No model loaded")
             
+        # Calculate uptime in seconds
+        uptime = time.time() - self.start_time
+        
         return {
             "type": self.model_type,
             "framework": self.framework,
@@ -317,6 +321,7 @@ class ModelWrapper:
             "model_path": self.model_path,
             "metrics": {
                 "requests": self.request_count,
-                "avg_latency": round(self.average_latency, 2)
+                "avg_latency": round(self.average_latency, 2),
+                "uptime": round(uptime, 2)
             }
         }

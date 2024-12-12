@@ -343,12 +343,51 @@ function ModelInfoCard({ modelInfo }) {
 }
 
 // Metrics Component
-function MetricsCard({ metrics, metricsHistory }) {
-    if (!metrics) return <LoadingSpinner />;
+function MetricsDisplay({ metrics }) {
+    const [metricsHistory, setMetricsHistory] = React.useState([]);
+    const [currentUptime, setCurrentUptime] = React.useState(0);
+    const [startTime] = React.useState(Date.now() / 1000); // Store initial timestamp in seconds
+
+    // Format uptime into minutes
+    const formatUptime = (seconds) => {
+        if (seconds === undefined || seconds === null || isNaN(seconds)) return '0 min';
+        const minutes = Math.floor(seconds / 60);
+        return `${minutes} min`;
+    };
+
+    // Update uptime based on start time
+    React.useEffect(() => {
+        const timer = setInterval(() => {
+            const now = Date.now() / 1000;
+            const uptime = now - startTime + (metrics?.metrics?.uptime || 0);
+            setCurrentUptime(uptime);
+        }, 1000);
+
+        return () => clearInterval(timer);
+    }, [startTime, metrics?.metrics?.uptime]);
+
+    React.useEffect(() => {
+        if (metrics) {
+            setMetricsHistory(prev => {
+                const newHistory = [...prev];
+                // Keep last 100 data points for scrolling
+                if (newHistory.length > 100) {
+                    newHistory.shift();
+                }
+                // Add new data point with timestamp
+                newHistory.push({
+                    time: new Date(),
+                    requests: metrics.requests,
+                    avg_latency: metrics.avg_latency
+                });
+                return newHistory;
+            });
+        }
+    }, [metrics]);
 
     React.useEffect(() => {
         if (metricsHistory.length > 0) {
-            const latencyTrace = {
+            const trace = {
                 x: metricsHistory.map(m => m.time),
                 y: metricsHistory.map(m => m.avg_latency),
                 type: 'scatter',
@@ -356,31 +395,20 @@ function MetricsCard({ metrics, metricsHistory }) {
                 line: { color: '#4F46E5' }
             };
 
-            const requestsTrace = {
-                x: metricsHistory.map(m => m.time),
-                y: metricsHistory.map(m => m.requests),
-                type: 'scatter',
-                name: 'Total Requests',
-                yaxis: 'y2',
-                line: { color: '#059669' }
-            };
-
             const layout = {
                 title: '',
                 height: 250,
+                width: Math.max(800, metricsHistory.length * 20), // Make width dynamic based on points
                 margin: { t: 10, r: 50, l: 50, b: 30 },
-                xaxis: { title: 'Time' },
+                xaxis: { 
+                    title: 'Time',
+                    rangeslider: {}, // Add range slider for scrolling
+                    type: 'date'
+                },
                 yaxis: { 
                     title: 'Avg Latency (ms)',
                     titlefont: { color: '#4F46E5' },
                     tickfont: { color: '#4F46E5' }
-                },
-                yaxis2: {
-                    title: 'Total Requests',
-                    titlefont: { color: '#059669' },
-                    tickfont: { color: '#059669' },
-                    overlaying: 'y',
-                    side: 'right'
                 },
                 showlegend: true,
                 legend: {
@@ -390,31 +418,39 @@ function MetricsCard({ metrics, metricsHistory }) {
             };
 
             const config = {
-                displayModeBar: false
+                displayModeBar: false,
+                scrollZoom: true, // Enable scroll zoom
+                responsive: true
             };
 
-            Plotly.newPlot('metrics-chart', [latencyTrace, requestsTrace], layout, config);
+            Plotly.newPlot('metrics-chart', [trace], layout, config);
         }
     }, [metricsHistory]);
 
+    if (!metrics) return null;
+
     return (
-        <div className="bg-white p-6 rounded-lg shadow">
-            <h2 className="text-2xl font-bold mb-4">Real-time Metrics</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <div className="p-4 bg-indigo-50 rounded">
-                    <p className="text-sm text-indigo-600">Average Latency</p>
-                    <p className="text-2xl font-bold text-indigo-700">
-                        {metrics.avg_latency.toFixed(2)} ms
-                    </p>
+        <div className="bg-white p-4 rounded-lg shadow">
+            <h3 className="text-lg font-semibold mb-2">Metrics</h3>
+            <div className="grid grid-cols-3 gap-4 mb-4">
+                <div>
+                    <div className="text-sm text-gray-600">Total Requests</div>
+                    <div className="text-xl font-bold">{metrics.requests}</div>
                 </div>
-                <div className="p-4 bg-green-50 rounded">
-                    <p className="text-sm text-green-600">Total Requests</p>
-                    <p className="text-2xl font-bold text-green-700">
-                        {metrics.requests}
-                    </p>
+                <div>
+                    <div className="text-sm text-gray-600">Avg Latency</div>
+                    <div className="text-xl font-bold">{metrics.avg_latency?.toFixed(2) || '0.00'}ms</div>
+                </div>
+                <div>
+                    <div className="text-sm text-gray-600">Uptime</div>
+                    <div className="text-xl font-bold">{formatUptime(currentUptime)}</div>
                 </div>
             </div>
-            <div id="metrics-chart" className="w-full"></div>
+            <div className="flex justify-center">
+                <div className="overflow-x-auto max-w-full">
+                    <div id="metrics-chart" className="w-[800px]"></div>
+                </div>
+            </div>
         </div>
     );
 }
@@ -542,7 +578,7 @@ function App() {
 
                 {/* Middle Row: Real-time Metrics */}
                 <div className="grid grid-cols-1 gap-6">
-                    <MetricsCard metrics={metrics} metricsHistory={metricsHistory} />
+                    <MetricsDisplay metrics={metrics} />
                 </div>
 
                 {/* Bottom Row: Model Info */}
