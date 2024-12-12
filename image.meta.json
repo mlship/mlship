@@ -1,0 +1,30 @@
+{
+  "type": "image_classifier",
+  "format": "pytorch",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "image": {
+        "type": "string",
+        "format": "base64",
+        "description": "Base64 encoded RGB image (224x224)"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "class": {
+        "type": "integer",
+        "description": "Predicted digit class (0-9)"
+      },
+      "probabilities": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "description": "Class probabilities"
+      }
+    }
+  }
+}

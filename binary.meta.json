@@ -1,0 +1,30 @@
+{
+  "type": "binary_classifier",
+  "format": "joblib",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "a": {
+        "type": "number",
+        "description": "First number"
+      },
+      "b": {
+        "type": "number",
+        "description": "Second number"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "prediction": {
+        "type": "boolean",
+        "description": "True if b > a"
+      },
+      "probability": {
+        "type": "number",
+        "description": "Probability that b > a"
+      }
+    }
+  }
+}

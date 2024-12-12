@@ -1,0 +1,29 @@
+{
+  "type": "regressor",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "x": {
+        "type": "number",
+        "description": "First number"
+      },
+      "y": {
+        "type": "number",
+        "description": "Second number"
+      },
+      "z": {
+        "type": "number",
+        "description": "Third number"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "prediction": {
+        "type": "number",
+        "description": "Predicted sum"
+      }
+    }
+  }
+}
