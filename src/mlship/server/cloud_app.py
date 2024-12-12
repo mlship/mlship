@@ -6,7 +6,18 @@ import json
 from pathlib import Path
 import shutil
 import webbrowser
+from enum import Enum
 from typing import Optional
+
+class CloudProvider(str, Enum):
+    aws = "aws"
+    gcp = "gcp"
+    azure = "azure"
+
+class GpuType(str, Enum):
+    nvidia_t4 = "nvidia-t4"
+    nvidia_a100 = "nvidia-a100"
+    nvidia_a100_multi = "nvidia-a100-multi"
 
 app = FastAPI()
 
@@ -111,9 +122,9 @@ async def remove_model():
 
 @app.post("/api/deploy")
 async def deploy_model(
-    gpu_type: str,
+    gpu_type: GpuType,
+    cloud_provider: CloudProvider,
     auto_scaling: bool = False,
-    monitoring: bool = False,
     model_file: Optional[UploadFile] = File(None)
 ):
     """Deploy a model to the cloud."""
@@ -165,8 +176,8 @@ async def deploy_model(
             "filename": os.path.basename(model_path),
             "status": "running",
             "gpu_type": gpu_type,
+            "cloud_provider": cloud_provider,
             "auto_scaling": auto_scaling,
-            "monitoring": monitoring,
             "metrics": {
                 "memory_usage": "0GB",
                 "requests_per_hour": 0
