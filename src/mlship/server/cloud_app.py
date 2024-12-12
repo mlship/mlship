@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 import shutil
 import webbrowser
-import time
 from typing import Optional
 
 app = FastAPI()
@@ -14,7 +13,11 @@ app = FastAPI()
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],  # Next.js development servers
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "https://mlship-cloud.vercel.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -22,6 +25,8 @@ app.add_middleware(
 
 # Store deployments in memory (in production, use a database)
 deployments = {}
+
+FRONTEND_URL = "https://mlship-cloud.vercel.app"
 
 def save_model_path(model_path: str):
     """Save the model path to the config file."""
@@ -40,12 +45,12 @@ def save_model_path(model_path: str):
 @app.get("/")
 async def root():
     """Redirect to the Next.js frontend."""
-    return RedirectResponse(url="http://localhost:3000")
+    return RedirectResponse(url=FRONTEND_URL)
 
 @app.get("/cloud")
 async def cloud_redirect():
     """Redirect to the Next.js frontend."""
-    return RedirectResponse(url="http://localhost:3000")
+    return RedirectResponse(url=FRONTEND_URL)
 
 @app.get("/api/model")
 async def get_model_info():
@@ -64,6 +69,26 @@ async def get_model_info():
     except (FileNotFoundError, json.JSONDecodeError):
         pass
     return {"model_path": None, "filename": None, "size": None}
+
+@app.delete("/api/model")
+async def remove_model():
+    """Remove the model file and clear the config."""
+    config_file = os.path.join(os.path.expanduser("~"), ".mlship", "config.json")
+    try:
+        with open(config_file) as f:
+            config = json.load(f)
+            model_path = config.get("model_path")
+            if model_path and os.path.exists(model_path):
+                # Only delete if it's in the uploads directory
+                if os.path.dirname(model_path).endswith("uploads"):
+                    os.remove(model_path)
+        
+        # Clear the config
+        os.remove(config_file)
+        return {"status": "success"}
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return {"status": "no_model_found"}
 
 @app.post("/api/deploy")
 async def deploy_model(
@@ -137,21 +162,21 @@ async def stop_deployment(deployment_id: int):
     deployments[deployment_id]["status"] = "stopped"
     return deployments[deployment_id]
 
-def start_cloud_server(host: str = "0.0.0.0", port: int = 8000):
-    """Start the cloud deployment server."""
-    import uvicorn
-    uvicorn.run(app, host=host, port=port)
-
 def deploy_from_cli(model_path: str):
     """Handle deployment from CLI command."""
     try:
         # Save the model path
         save_model_path(model_path)
         
-        # Open the browser
-        webbrowser.open("http://localhost:3000")
+        # Open the browser to the Vercel deployment
+        webbrowser.open(FRONTEND_URL)
         
         # Start the server
         start_cloud_server()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))
+
+def start_cloud_server(host: str = "0.0.0.0", port: int = 8000):
+    """Start the cloud deployment server."""
+    import uvicorn
+    uvicorn.run(app, host=host, port=port) 
