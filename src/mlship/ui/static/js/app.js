@@ -114,7 +114,8 @@ function PredictionForm({ modelInfo, onPredict, onError }) {
                 inputs: isImageModel ? imagePreview : inputs.map(i => i.value),
                 prediction: result.prediction,
                 timestamp,
-                isImage: isImageModel
+                isImage: isImageModel,
+                modelPath: modelInfo.model_path
             });
 
             // Clear inputs after successful prediction
@@ -249,8 +250,12 @@ function PredictionResults({ predictions, onClear }) {
             </div>
             <div className="predictions-container">
                 {predictions.map((pred, index) => (
-                    <div key={index} className="mb-4 p-4 border rounded">
-                        <div className="text-sm text-gray-500">
+                    <div key={index} className="mb-4 p-4 border rounded relative">
+                        {/* Model filename in top right */}
+                        <div className="absolute top-2 right-2 text-sm text-gray-500 font-mono">
+                            {pred.modelPath ? pred.modelPath.split('/').pop() : 'Unknown Model'}
+                        </div>
+                        <div className="text-sm text-gray-500 mt-6">
                             {pred.timestamp.toLocaleString()}
                         </div>
                         <div className="mt-2">
