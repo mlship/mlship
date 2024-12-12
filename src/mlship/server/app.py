@@ -7,6 +7,7 @@ import asyncio
 import uvicorn
 from pathlib import Path
 from .loader import ModelLoader
+from .dashboard_routes import router as dashboard_router
 
 app = FastAPI()
 
@@ -26,6 +27,13 @@ def setup_ui_routes(app, templates):
         return templates.TemplateResponse("index.html", {
             "request": request,
             "model_info": json.dumps(get_model_info(app.state.model))
+        })
+
+    @app.get("/dashboard", response_class=HTMLResponse)
+    async def dashboard_ui(request: Request):
+        """Serve the dashboard UI."""
+        return templates.TemplateResponse("dashboard.html", {
+            "request": request
         })
 
 def setup_api_routes(app, model):
@@ -90,6 +98,9 @@ def start_server(model_path: str, host: str = "localhost", port: int = 8000, ui:
         app.mount("/static", StaticFiles(directory=str(package_dir / "ui" / "static")), name="static")
         templates = Jinja2Templates(directory=str(package_dir / "ui" / "templates"))
         setup_ui_routes(app, templates)
+    
+    # Register dashboard routes
+    app.include_router(dashboard_router)
     
     # Load model
     try:

@@ -11,6 +11,7 @@ from pathlib import Path
 from .utils.constants import PID_FILE, METRICS_FILE, LOG_FILE, CONFIG_FILE
 from .utils.daemon import cleanup_files, daemonize
 from .utils.create_test_model import create_test_model
+from .server.cloud_app import deploy_from_cli
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,8 @@ def cli():
 @click.option('--port', default=8000, help='Port to bind to')
 @click.option('--ui/--no-ui', default=True, help='Enable/disable web interface')
 @click.option('--daemon', is_flag=True, help='Run in daemon mode')
-def deploy(model_path, host, port, ui, daemon):
+@click.option('--cloud', is_flag=True, help='Deploy to cloud providers')
+def deploy(model_path, host, port, ui, daemon, cloud):
     """Deploy a model as a REST API.
     
     MODEL_PATH is the path to the model file to deploy.
@@ -48,40 +50,46 @@ def deploy(model_path, host, port, ui, daemon):
     mlship deploy model.pkl --port 8080       # Custom port
     mlship deploy model.h5 --no-ui            # Disable UI
     mlship deploy model.pt --daemon           # Run in background
+    mlship deploy model.pt --cloud            # Deploy to cloud
     """
     try:
-        # Check if server is already running
-        if os.path.exists(PID_FILE):
-            with open(PID_FILE) as f:
-                pid = int(f.read().strip())
-                try:
-                    process = psutil.Process(pid)
-                    if process.is_running():
-                        click.echo("Server is already running. Stop it first.")
-                        return
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
-            # Clean up stale PID file
-            cleanup_files()
-
-        # Convert model path to absolute path if relative
-        if not os.path.isabs(model_path):
-            model_path = os.path.abspath(model_path)
-
-        # Print URLs
-        click.echo(f"🚀 API: http://{host if host != '0.0.0.0' else 'localhost'}:{port}")
-        if ui:
-            click.echo(f"🎨 UI: http://{host if host != '0.0.0.0' else 'localhost'}:{port}/ui")
+        if cloud:
+            # Convert to absolute path
+            abs_path = os.path.abspath(model_path)
+            deploy_from_cli(abs_path)
         else:
-            click.echo("UI disabled")
+            # Check if server is already running
+            if os.path.exists(PID_FILE):
+                with open(PID_FILE) as f:
+                    pid = int(f.read().strip())
+                    try:
+                        process = psutil.Process(pid)
+                        if process.is_running():
+                            click.echo("Server is already running. Stop it first.")
+                            return
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                # Clean up stale PID file
+                cleanup_files()
 
-        if daemon:
-            click.echo("Starting server in daemon mode...")
-            daemonize(model_path, host, port, ui)
-        else:
-            click.echo("Starting server in foreground mode...")
-            from .server.app import start_server
-            start_server(model_path, host=host, port=port, ui=ui)
+            # Convert model path to absolute path if relative
+            if not os.path.isabs(model_path):
+                model_path = os.path.abspath(model_path)
+
+            # Print URLs
+            click.echo(f"🚀 API: http://{host if host != '0.0.0.0' else 'localhost'}:{port}")
+            if ui:
+                click.echo(f"🎨 UI: http://{host if host != '0.0.0.0' else 'localhost'}:{port}/ui")
+            else:
+                click.echo("UI disabled")
+
+            if daemon:
+                click.echo("Starting server in daemon mode...")
+                daemonize(model_path, host, port, ui)
+            else:
+                click.echo("Starting server in foreground mode...")
+                from .server.app import start_server
+                start_server(model_path, host=host, port=port, ui=ui)
     except Exception as e:
         logger.error(f"Deployment failed: {str(e)}")
         click.echo(f"Failed to load model: {str(e)}")
