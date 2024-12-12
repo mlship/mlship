@@ -13,11 +13,7 @@ app = FastAPI()
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "https://mlship-cloud.vercel.app"
-    ],
+    allow_origins=["http://localhost:3000", "http://localhost:3001"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -26,12 +22,35 @@ app.add_middleware(
 # Store deployments in memory (in production, use a database)
 deployments = {}
 
-FRONTEND_URL = "https://mlship-cloud.vercel.app"
+FRONTEND_URL = "http://localhost:3000"
+
+# Allowed ML model file extensions
+ALLOWED_EXTENSIONS = {
+    '.pt',      # PyTorch
+    '.pth',     # PyTorch
+    '.h5',      # Keras/TensorFlow
+    '.pb',      # TensorFlow (protobuf)
+    '.onnx',    # ONNX
+    '.pkl',     # Scikit-learn
+    '.joblib',  # Scikit-learn
+    '.model',   # XGBoost
+    '.bin',     # LightGBM
+    '.pmml',    # PMML format
+    '.mar',     # TorchServe
+    '.savedmodel'  # TensorFlow SavedModel
+}
+
+def is_valid_model_file(filename: str) -> bool:
+    """Check if the file has an allowed ML model extension."""
+    return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
 
 def save_model_path(model_path: str):
     """Save the model path to the config file."""
     if not os.path.exists(model_path):
         raise ValueError(f"Model file not found: {model_path}")
+    
+    if not is_valid_model_file(model_path):
+        raise ValueError(f"Invalid model file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}")
         
     mlship_dir = os.path.join(os.path.expanduser("~"), ".mlship")
     os.makedirs(mlship_dir, exist_ok=True)
@@ -105,6 +124,12 @@ async def deploy_model(
         
         # If model file is uploaded through the web interface
         if model_file:
+            if not is_valid_model_file(model_file.filename):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid model file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
+                )
+                
             # Save the uploaded file
             upload_dir = os.path.join(mlship_dir, "uploads")
             os.makedirs(upload_dir, exist_ok=True)
@@ -124,6 +149,11 @@ async def deploy_model(
                     model_path = config.get("model_path")
                     if not model_path or not os.path.exists(model_path):
                         raise HTTPException(status_code=400, detail="No valid model file provided")
+                    if not is_valid_model_file(model_path):
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Invalid model file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
+                        )
             except (FileNotFoundError, json.JSONDecodeError):
                 raise HTTPException(status_code=400, detail="No model file provided")
         
@@ -168,7 +198,7 @@ def deploy_from_cli(model_path: str):
         # Save the model path
         save_model_path(model_path)
         
-        # Open the browser to the Vercel deployment
+        # Open the browser to localhost
         webbrowser.open(FRONTEND_URL)
         
         # Start the server
