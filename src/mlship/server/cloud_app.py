@@ -11,6 +11,8 @@ from typing import Optional
 from pydantic import BaseModel
 from ..cloud.gcp import create_instance, delete_instance, get_instance_ip, get_available_zones_with_gpus
 from ..config.cloud_config import get_cloud_config
+from ..cloud.aws import get_available_gpus as get_aws_gpus
+from ..cloud.azure import get_available_gpus as get_azure_gpus
 
 class CloudProvider(str, Enum):
     aws = "aws"
@@ -442,17 +444,79 @@ async def remove_model():
 
 @app.get("/api/gpu-availability")
 async def get_gpu_availability():
-    """Get GPU availability across all zones."""
+    """Get GPU availability across all cloud providers."""
     try:
         # Get cloud configuration
         cloud_config = get_cloud_config()
+        available_gpus = {}
         
-        # Get available zones with GPUs
-        available_zones = get_available_zones_with_gpus(
-            credentials_base64=cloud_config["gcp"].get("credentials_base64")
-        )
+        # Get GCP GPUs
+        try:
+            gcp_zones = get_available_zones_with_gpus(
+                credentials_base64=cloud_config["gcp"].get("credentials_base64")
+            )
+            
+            for zone_info in gcp_zones.values():
+                if zone_info['status'] == 'UP':
+                    for gpu in zone_info['gpus']:
+                        gpu_id = f"gcp-{gpu['name']}"
+                        if gpu_id not in available_gpus:
+                            available_gpus[gpu_id] = {
+                                'name': gpu['name'],
+                                'description': gpu['description'],
+                                'maximumCardsPerInstance': gpu['maximumCardsPerInstance'],
+                                'provider': 'gcp',
+                                'price': get_gpu_price('gcp', gpu['name']),
+                                'status': 'UP'
+                            }
+        except Exception as e:
+            print(f"Error getting GCP GPUs: {str(e)}")
         
-        return available_zones
+        # Get AWS GPUs
+        try:
+            if "aws" in cloud_config:
+                aws_gpus = get_aws_gpus()
+                for gpu in aws_gpus:
+                    gpu_id = f"aws-{gpu['name']}"
+                    if gpu_id not in available_gpus:
+                        gpu['price'] = get_gpu_price('aws', gpu['name'])
+                        available_gpus[gpu_id] = gpu
+        except Exception as e:
+            print(f"Error getting AWS GPUs: {str(e)}")
+        
+        # Get Azure GPUs
+        try:
+            if "azure" in cloud_config and "subscription_id" in cloud_config["azure"]:
+                azure_gpus = get_azure_gpus(cloud_config["azure"]["subscription_id"])
+                for gpu in azure_gpus:
+                    gpu_id = f"azure-{gpu['name']}"
+                    if gpu_id not in available_gpus:
+                        gpu['price'] = get_gpu_price('azure', gpu['name'])
+                        available_gpus[gpu_id] = gpu
+        except Exception as e:
+            print(f"Error getting Azure GPUs: {str(e)}")
+        
+        return available_gpus
     except Exception as e:
         print(f"Error getting GPU availability: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))
+
+def get_gpu_price(provider: str, gpu_type: str) -> float:
+    """Get the price per hour for a GPU type."""
+    # These are example prices - replace with actual pricing API calls
+    pricing = {
+        'gcp': {
+            'nvidia-tesla-t4': 0.35,
+            'nvidia-tesla-a100': 2.93,
+        },
+        'aws': {
+            'nvidia-t4': 0.526,
+            'nvidia-a100': 3.06,
+        },
+        'azure': {
+            'nvidia-t4': 0.526,
+            'nvidia-a100': 3.06,
+        }
+    }
+    
+    return pricing.get(provider, {}).get(gpu_type, 0.0)
