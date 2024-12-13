@@ -37,8 +37,7 @@ def cli():
 @click.option('--port', default=8000, help='Port to bind to')
 @click.option('--ui/--no-ui', default=True, help='Enable/disable web interface')
 @click.option('--daemon', is_flag=True, help='Run in daemon mode')
-@click.option('--cloud', is_flag=True, help='Deploy to cloud providers')
-def deploy(model_path, host, port, ui, daemon, cloud):
+def deploy(model_path, host, port, ui, daemon):
     """Deploy a model as a REST API.
     
     MODEL_PATH is the path to the model file to deploy.
@@ -46,54 +45,80 @@ def deploy(model_path, host, port, ui, daemon, cloud):
     
     Examples:
     \b
-    mlship deploy model.joblib                # Run in foreground
+    mlship deploy model.joblib                # Run in foreground with UI
     mlship deploy model.pkl --port 8080       # Custom port
     mlship deploy model.h5 --no-ui            # Disable UI
     mlship deploy model.pt --daemon           # Run in background
-    mlship deploy model.pt --cloud            # Deploy to cloud
     """
     try:
-        if cloud:
-            # Convert to absolute path
-            abs_path = os.path.abspath(model_path)
-            deploy_from_cli(abs_path)
+        # Check if server is already running
+        if os.path.exists(PID_FILE):
+            with open(PID_FILE) as f:
+                pid = int(f.read().strip())
+                try:
+                    process = psutil.Process(pid)
+                    if process.is_running():
+                        click.echo("Server is already running. Stop it first.")
+                        return
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            # Clean up stale PID file
+            cleanup_files()
+
+        # Convert model path to absolute path if relative
+        if not os.path.isabs(model_path):
+            model_path = os.path.abspath(model_path)
+
+        # Print URLs
+        click.echo(f"🚀 API: http://{host if host != '0.0.0.0' else 'localhost'}:{port}")
+        if ui:
+            click.echo(f"🎨 UI: http://{host if host != '0.0.0.0' else 'localhost'}:{port}/ui")
         else:
-            # Check if server is already running
-            if os.path.exists(PID_FILE):
-                with open(PID_FILE) as f:
-                    pid = int(f.read().strip())
-                    try:
-                        process = psutil.Process(pid)
-                        if process.is_running():
-                            click.echo("Server is already running. Stop it first.")
-                            return
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
-                # Clean up stale PID file
-                cleanup_files()
+            click.echo("UI disabled")
 
-            # Convert model path to absolute path if relative
-            if not os.path.isabs(model_path):
-                model_path = os.path.abspath(model_path)
-
-            # Print URLs
-            click.echo(f"🚀 API: http://{host if host != '0.0.0.0' else 'localhost'}:{port}")
-            if ui:
-                click.echo(f"🎨 UI: http://{host if host != '0.0.0.0' else 'localhost'}:{port}/ui")
-            else:
-                click.echo("UI disabled")
-
-            if daemon:
-                click.echo("Starting server in daemon mode...")
-                daemonize(model_path, host, port, ui)
-            else:
-                click.echo("Starting server in foreground mode...")
-                from .server.app import start_server
-                start_server(model_path, host=host, port=port, ui=ui)
+        if daemon:
+            click.echo("Starting server in daemon mode...")
+            daemonize(model_path, host, port, ui)
+        else:
+            click.echo("Starting server in foreground mode...")
+            from .server.app import start_server
+            start_server(model_path, host=host, port=port, ui=ui)
     except Exception as e:
         logger.error(f"Deployment failed: {str(e)}")
         click.echo(f"Failed to load model: {str(e)}")
         cleanup_files()
+        sys.exit(1)
+
+@cli.command()
+@click.argument('model_path', type=click.Path(exists=True))
+@click.option('--host', default='0.0.0.0', help='Host to bind to')
+@click.option('--port', default=3000, help='Port to bind to')
+def serve(model_path, host, port):
+    """Serve a model with the cloud dashboard UI.
+    
+    MODEL_PATH is the path to the model file to serve.
+    This will start the cloud dashboard UI on port 3000 (default).
+    
+    Examples:
+    \b
+    mlship serve model.joblib                # Start dashboard on port 3000
+    mlship serve model.pkl --port 3001       # Custom port for dashboard
+    """
+    try:
+        # Convert to absolute path
+        abs_path = os.path.abspath(model_path)
+        # Save model path for cloud deployment
+        from .server.cloud_app import save_model_path
+        save_model_path(abs_path)
+        # Open the cloud dashboard
+        import webbrowser
+        webbrowser.open(f"http://{host if host != '0.0.0.0' else 'localhost'}:{port}")
+        # Start the cloud server
+        from .server.cloud_app import start_cloud_server
+        start_cloud_server(host=host, port=8000)  # API server on 8000
+    except Exception as e:
+        logger.error(f"Failed to serve model: {str(e)}")
+        click.echo(f"Failed to serve model: {str(e)}")
         sys.exit(1)
 
 @cli.command()
