@@ -32,7 +32,7 @@ def get_cloud_config() -> Dict:
         },
         "gcp": {
             "project_id": os.getenv("GCP_PROJECT_ID", ""),
-            "credentials_file": os.getenv("GCP_CREDENTIALS_FILE", ""),
+            "credentials": os.getenv("GCP_CREDENTIALS", ""),  # Base64 encoded credentials
             "zone": os.getenv("GCP_ZONE", "us-central1-a"),
             "instance_types": get_instance_types("gcp")
         },
@@ -78,4 +78,4 @@ def get_frontend_url() -> str:
 
 def get_active_provider() -> str:
     """Get the active cloud provider."""
-    return get_cloud_config()["provider"] 
+    return os.getenv("CLOUD_PROVIDER", "gcp") 

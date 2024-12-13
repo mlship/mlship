@@ -5,13 +5,28 @@ import os
 import time
 from typing import Dict, Optional
 
-def get_credentials(credentials_file: Optional[str] = None):
-    """Get Google Cloud credentials."""
-    if credentials_file:
-        return service_account.Credentials.from_service_account_file(
-            credentials_file,
-            scopes=['https://www.googleapis.com/auth/cloud-platform']
-        )
+def get_credentials(credentials_base64: Optional[str] = None):
+    """Get Google Cloud credentials from base64-encoded string."""
+    if credentials_base64:
+        import base64
+        import tempfile
+        
+        # Decode base64 credentials
+        credentials_json = base64.b64decode(credentials_base64).decode('utf-8')
+        
+        # Create temporary file for credentials
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
+            temp_file.write(credentials_json)
+            temp_file_path = temp_file.name
+        
+        try:
+            return service_account.Credentials.from_service_account_file(
+                temp_file_path,
+                scopes=['https://www.googleapis.com/auth/cloud-platform']
+            )
+        finally:
+            # Clean up temporary file
+            os.unlink(temp_file_path)
     return None
 
 def create_instance(
@@ -20,11 +35,11 @@ def create_instance(
     instance_name: str,
     machine_type: str = "n1-standard-4",
     startup_script: str = "",
-    credentials_file: Optional[str] = None
+    credentials_base64: Optional[str] = None
 ) -> compute_v1.Instance:
     """Create a GCP instance."""
     try:
-        credentials = get_credentials(credentials_file)
+        credentials = get_credentials(credentials_base64)
         compute = build('compute', 'v1', credentials=credentials)
 
         # Get the latest Debian image
