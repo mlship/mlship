@@ -69,7 +69,16 @@ def save_model_path(model_path: str):
     mlship_dir = os.path.join(os.path.expanduser("~"), ".mlship")
     os.makedirs(mlship_dir, exist_ok=True)
     
-    config = {"model_path": os.path.abspath(model_path)}
+    # Create models directory if it doesn't exist
+    models_dir = os.path.join(mlship_dir, "models")
+    os.makedirs(models_dir, exist_ok=True)
+    
+    # Copy the model file to the models directory
+    model_filename = os.path.basename(model_path)
+    new_model_path = os.path.join(models_dir, model_filename)
+    shutil.copy2(model_path, new_model_path)
+    
+    config = {"model_path": new_model_path}
     config_file = os.path.join(mlship_dir, "config.json")
     
     with open(config_file, "w") as f:
@@ -258,6 +267,7 @@ async def get_model_info():
         with open(config_file) as f:
             config = json.load(f)
             model_path = config.get("model_path")
+            
             if model_path and os.path.exists(model_path):
                 print(f"Found model at: {model_path}")
                 return {
@@ -267,6 +277,21 @@ async def get_model_info():
                 }
             else:
                 print(f"Model not found at: {model_path}")
+                # Try to find model in models directory
+                models_dir = os.path.join(os.path.expanduser("~"), ".mlship", "models")
+                if os.path.exists(models_dir):
+                    model_files = [f for f in os.listdir(models_dir) if is_valid_model_file(f)]
+                    if model_files:
+                        model_path = os.path.join(models_dir, model_files[0])
+                        # Update config with found model
+                        config["model_path"] = model_path
+                        with open(config_file, "w") as f:
+                            json.dump(config, f)
+                        return {
+                            "model_path": model_path,
+                            "filename": os.path.basename(model_path),
+                            "size": os.path.getsize(model_path)
+                        }
     except Exception as e:
         print(f"Error reading model info: {str(e)}")
     return {"model_path": None, "filename": None, "size": None}
@@ -281,12 +306,22 @@ async def remove_model():
                 config = json.load(f)
                 model_path = config.get("model_path")
                 if model_path and os.path.exists(model_path):
-                    # Only delete if it's in the uploads directory
-                    if os.path.dirname(model_path).endswith("uploads"):
+                    try:
                         os.remove(model_path)
+                    except Exception as e:
+                        print(f"Error removing model file: {str(e)}")
             
             # Clear the config
             os.remove(config_file)
+            
+            # Clean up models directory
+            models_dir = os.path.join(os.path.expanduser("~"), ".mlship", "models")
+            if os.path.exists(models_dir):
+                try:
+                    shutil.rmtree(models_dir)
+                except Exception as e:
+                    print(f"Error removing models directory: {str(e)}")
+            
             return {"status": "success"}
         return {"status": "no_model_found"}
     except Exception as e:

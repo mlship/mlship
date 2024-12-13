@@ -1,7 +1,18 @@
 from google.cloud import compute_v1
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 import os
 import time
 from typing import Dict, Optional
+
+def get_credentials(credentials_file: Optional[str] = None):
+    """Get Google Cloud credentials."""
+    if credentials_file:
+        return service_account.Credentials.from_service_account_file(
+            credentials_file,
+            scopes=['https://www.googleapis.com/auth/cloud-platform']
+        )
+    return None
 
 def create_instance(
     project_id: str,
