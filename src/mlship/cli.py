@@ -69,6 +69,14 @@ def deploy(model_path, host, port, ui, daemon):
         # Convert model path to absolute path if relative
         if not os.path.isabs(model_path):
             model_path = os.path.abspath(model_path)
+            
+        # Save the model path to config
+        mlship_dir = os.path.join(os.path.expanduser("~"), ".mlship")
+        os.makedirs(mlship_dir, exist_ok=True)
+        config_file = os.path.join(mlship_dir, "config.json")
+        with open(config_file, "w") as f:
+            json.dump({"model_path": model_path}, f)
+        click.echo(f"Saved model path to config: {model_path}")
 
         # Print URLs
         click.echo(f"🚀 API: http://{host if host != '0.0.0.0' else 'localhost'}:{port}")
@@ -91,29 +99,28 @@ def deploy(model_path, host, port, ui, daemon):
         sys.exit(1)
 
 @cli.command()
-@click.argument('model_path', type=click.Path(exists=True), required=False)
-@click.option("--port", default=8000, help="Port to run the server on")
-def serve(model_path: Optional[str], port: int):
+def serve():
     """Start the MLship server.
     
-    If MODEL_PATH is provided, it will be used for deployment.
-    If no MODEL_PATH is provided, it will start the server only.
+    This command starts the server and opens the MLship Cloud dashboard.
+    To deploy models, please use the web interface at mlship-cloud.vercel.app
     """
     import webbrowser
-    from .server.cloud_app import deploy_from_cli, start_cloud_server
+    from .server.cloud_app import start_cloud_server
     from .config.cloud_config import get_frontend_url
     
     try:
-        if model_path:
-            # Deploy the model using the cloud dashboard
-            deploy_from_cli(model_path)
-        else:
-            # Just start the server and open the frontend
-            webbrowser.open(get_frontend_url())
-            start_cloud_server(port=port)
+        # Open the frontend URL
+        frontend_url = get_frontend_url()
+        click.echo(f"Opening MLship Cloud dashboard at {frontend_url}")
+        webbrowser.open(frontend_url)
+        
+        # Start the local server
+        click.echo("Starting local server...")
+        start_cloud_server(port=8000)
     except Exception as e:
-        logger.error(f"Failed to serve model: {str(e)}")
-        click.echo(f"Failed to serve model: {str(e)}")
+        logger.error(f"Failed to start server: {str(e)}")
+        click.echo(f"Failed to start server: {str(e)}")
         sys.exit(1)
 
 @cli.command()

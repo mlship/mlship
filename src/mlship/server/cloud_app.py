@@ -169,6 +169,7 @@ async def deploy_model(request: DeploymentRequest):
             raise HTTPException(status_code=400, detail="Only GCP deployments are currently supported")
     
     except Exception as e:
+        print(f"Deployment error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/deployments")
@@ -241,7 +242,7 @@ async def get_model_info():
         config_file = os.path.join(os.path.expanduser("~"), ".mlship", "config.json")
         if not os.path.exists(config_file):
             print("Config file not found")
-            return {"model_path": None, "filename": None, "size": None}
+            return {"status": "no_model"}
             
         with open(config_file) as f:
             config = json.load(f)
@@ -255,9 +256,10 @@ async def get_model_info():
                 }
             else:
                 print(f"Model not found at: {model_path}")
+                return {"status": "no_model"}
     except Exception as e:
         print(f"Error reading model info: {str(e)}")
-    return {"model_path": None, "filename": None, "size": None}
+        return {"status": "error", "detail": str(e)}
 
 @app.delete("/api/model")
 async def remove_model():
@@ -265,18 +267,10 @@ async def remove_model():
     try:
         config_file = os.path.join(os.path.expanduser("~"), ".mlship", "config.json")
         if os.path.exists(config_file):
-            with open(config_file) as f:
-                config = json.load(f)
-                model_path = config.get("model_path")
-                if model_path and os.path.exists(model_path):
-                    # Only delete if it's in the uploads directory
-                    if os.path.dirname(model_path).endswith("uploads"):
-                        os.remove(model_path)
-            
-            # Clear the config
+            # Just remove the config file, don't delete the actual model file
             os.remove(config_file)
             return {"status": "success"}
         return {"status": "no_model_found"}
     except Exception as e:
         print(f"Error removing model: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+        return {"status": "error", "detail": str(e)} 
