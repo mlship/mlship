@@ -99,17 +99,30 @@ def deploy(model_path, host, port, ui, daemon):
         sys.exit(1)
 
 @cli.command()
-def serve():
-    """Start the MLship server.
+@click.argument('model_path', type=click.Path(exists=True))
+def serve(model_path: str):
+    """Start the MLship server and upload model to cloud dashboard.
     
-    This command starts the server and opens the MLship Cloud dashboard.
-    To deploy models, please use the web interface at mlship-cloud.vercel.app
+    MODEL_PATH is the path to the model file to upload.
+    The model will be uploaded to the MLship Cloud dashboard for deployment.
     """
     import webbrowser
-    from .server.cloud_app import start_cloud_server
+    from .server.cloud_app import deploy_from_cli, start_cloud_server
     from .config.cloud_config import get_frontend_url
     
     try:
+        # Convert to absolute path if relative
+        model_path = os.path.abspath(model_path)
+        print(f"Processing model: {model_path}")
+        
+        # Save the model path to config
+        mlship_dir = os.path.join(os.path.expanduser("~"), ".mlship")
+        os.makedirs(mlship_dir, exist_ok=True)
+        config_file = os.path.join(mlship_dir, "config.json")
+        with open(config_file, "w") as f:
+            json.dump({"model_path": model_path}, f)
+        print(f"Saved model path to config: {model_path}")
+        
         # Open the frontend URL
         frontend_url = get_frontend_url()
         click.echo(f"Opening MLship Cloud dashboard at {frontend_url}")
