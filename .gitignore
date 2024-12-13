@@ -163,5 +163,3 @@ cython_debug/
 
 *.pkl
 *.joblib
-
-mlship_gcp_config.json
