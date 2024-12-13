@@ -78,18 +78,30 @@ def save_model_path(model_path: str):
 def get_startup_script(model_path: str) -> str:
     """Generate startup script for the VM instance."""
     return f"""#!/bin/bash
-# Install required packages
+# Update and install basic dependencies
 apt-get update
-apt-get install -y python3-pip git
+apt-get install -y python3-pip git wget
+
+# Install CUDA dependencies
+wget https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/cuda-keyring_1.0-1_all.deb
+dpkg -i cuda-keyring_1.0-1_all.deb
+apt-get update
+apt-get install -y cuda-toolkit-11-8
+
+# Set CUDA environment variables
+echo 'export PATH=/usr/local/cuda/bin:$PATH' >> /etc/profile.d/cuda.sh
+echo 'export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH' >> /etc/profile.d/cuda.sh
+source /etc/profile.d/cuda.sh
 
 # Clone MLship repository
 git clone https://github.com/yourusername/mlship.git
 cd mlship
 
-# Install dependencies
+# Install Python dependencies
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 pip3 install -r requirements.txt
 
-# Copy model file
+# Create model directory and copy model
 mkdir -p /model
 cp {model_path} /model/
 

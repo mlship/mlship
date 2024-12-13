@@ -7,91 +7,111 @@ def create_instance(
     project_id: str,
     zone: str,
     instance_name: str,
-    machine_type: str,
-    startup_script: str,
+    machine_type: str = "n1-standard-4",
+    startup_script: str = "",
     credentials_file: Optional[str] = None
 ) -> compute_v1.Instance:
-    """Create a GCP Compute Engine instance."""
-    
-    if credentials_file:
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_file
-    
-    instance_client = compute_v1.InstancesClient()
-    
-    # Configure the machine
-    machine_type = f"zones/{zone}/machineTypes/{machine_type}"
-    instance_config = {
-        "name": instance_name,
-        "machine_type": machine_type,
-        
-        # Specify the boot disk
-        "disks": [
-            {
-                "boot": True,
-                "auto_delete": True,
-                "initialize_params": {
-                    "source_image": "projects/deeplearning-platform-release/global/images/family/common-gpu",
-                    "disk_size_gb": 50
-                }
-            }
-        ],
-        
-        # Specify a network interface
-        "network_interfaces": [
-            {
-                "network": "global/networks/default",
-                "access_configs": [{"name": "External NAT"}]
-            }
-        ],
-        
-        # Allow the instance to access cloud APIs
-        "service_accounts": [
-            {
-                "email": "default",
-                "scopes": ["https://www.googleapis.com/auth/cloud-platform"]
-            }
-        ],
-        
-        # Metadata for startup script
-        "metadata": {
-            "items": [
+    """Create a GCP instance."""
+    try:
+        credentials = get_credentials(credentials_file)
+        compute = build('compute', 'v1', credentials=credentials)
+
+        # Get the latest Debian image
+        image_response = compute.images().getFromFamily(
+            project='debian-cloud',
+            family='debian-11'
+        ).execute()
+
+        source_disk_image = image_response['selfLink']
+
+        # Configure the machine
+        machine_type_url = f"zones/{zone}/machineTypes/{machine_type}"
+
+        # Configure GPU if using GPU machine type
+        accelerators = None
+        if "a2-" in machine_type:  # A100 GPU
+            accelerators = [{
+                "acceleratorType": f"zones/{zone}/acceleratorTypes/nvidia-tesla-a100",
+                "acceleratorCount": 1
+            }]
+        elif "n1-" in machine_type:  # T4 GPU
+            accelerators = [{
+                "acceleratorType": f"zones/{zone}/acceleratorTypes/nvidia-tesla-t4",
+                "acceleratorCount": 1
+            }]
+
+        config = {
+            'name': instance_name,
+            'machineType': machine_type_url,
+            'disks': [
                 {
-                    "key": "startup-script",
-                    "value": startup_script
+                    'boot': True,
+                    'autoDelete': True,
+                    'initializeParams': {
+                        'sourceImage': source_disk_image,
+                        'diskSizeGb': '50'
+                    }
                 }
-            ]
-        },
-        
-        # Enable GPU
-        "guest_accelerators": [
-            {
-                "accelerator_type": f"zones/{zone}/acceleratorTypes/nvidia-tesla-t4",
-                "accelerator_count": 1
+            ],
+            'networkInterfaces': [{
+                'network': 'global/networks/default',
+                'accessConfigs': [
+                    {'type': 'ONE_TO_ONE_NAT', 'name': 'External NAT'}
+                ]
+            }],
+            'serviceAccounts': [{
+                'email': 'default',
+                'scopes': [
+                    'https://www.googleapis.com/auth/devstorage.read_write',
+                    'https://www.googleapis.com/auth/compute'
+                ]
+            }],
+            'metadata': {
+                'items': [{
+                    'key': 'startup-script',
+                    'value': startup_script
+                }]
             }
-        ],
-        
-        # On-host maintenance must be disabled for GPU instances
-        "scheduling": {
-            "on_host_maintenance": "TERMINATE"
         }
-    }
-    
-    # Create the instance
-    operation = instance_client.insert(
-        project=project_id,
-        zone=zone,
-        instance_resource=instance_config
-    )
-    
-    # Wait for the operation to complete
-    while not operation.done():
-        time.sleep(5)
-    
-    return instance_client.get(
-        project=project_id,
-        zone=zone,
-        instance=instance_name
-    )
+
+        # Add GPU configuration if needed
+        if accelerators:
+            config['guestAccelerators'] = accelerators
+            # Add required GPU-specific items
+            config['metadata']['items'].extend([
+                {
+                    'key': 'install-nvidia-driver',
+                    'value': 'True'
+                }
+            ])
+            # Add scheduling requirements for GPU
+            config['scheduling'] = {
+                'onHostMaintenance': 'TERMINATE',
+                'automaticRestart': True
+            }
+
+        # Create the instance
+        operation = compute.instances().insert(
+            project=project_id,
+            zone=zone,
+            body=config
+        ).execute()
+
+        # Wait for the operation to complete
+        wait_for_operation(compute, project_id, zone, operation['name'])
+
+        # Get the created instance
+        instance = compute.instances().get(
+            project=project_id,
+            zone=zone,
+            instance=instance_name
+        ).execute()
+
+        return instance
+
+    except Exception as e:
+        print(f"Error creating instance: {str(e)}")
+        raise
 
 def delete_instance(
     project_id: str,
