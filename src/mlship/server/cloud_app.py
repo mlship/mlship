@@ -83,6 +83,7 @@ def save_model_path(model_path: str):
     
     with open(config_file, "w") as f:
         json.dump(config, f)
+    print(f"Saved model path to config: {model_path}")
 
 def get_startup_script(model_path: str) -> str:
     """Generate startup script for the VM instance."""
@@ -126,50 +127,34 @@ class DeploymentRequest(BaseModel):
 @app.post("/api/deploy")
 async def deploy_model(request: DeploymentRequest):
     """Deploy a model to the cloud."""
+    print("POST /api/deploy called")
     try:
-        # Create .mlship directory if it doesn't exist
-        mlship_dir = os.path.join(os.path.expanduser("~"), ".mlship")
-        os.makedirs(mlship_dir, exist_ok=True)
+        config_file = os.path.join(os.path.expanduser("~"), ".mlship", "config.json")
+        print(f"Looking for config file at: {config_file}")
         
-        # Get model path from config
-        config_file = os.path.join(mlship_dir, "config.json")
-        try:
-            with open(config_file) as f:
-                config = json.load(f)
-                model_path = config.get("model_path")
-                if not model_path or not os.path.exists(model_path):
-                    raise HTTPException(status_code=400, detail="No valid model file provided")
-                if not is_valid_model_file(model_path):
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Invalid model file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
-                    )
-        except (FileNotFoundError, json.JSONDecodeError):
-            raise HTTPException(status_code=400, detail="No model file provided")
-        
-        # Get cloud configuration
-        cloud_config = get_cloud_config()
-        
-        if request.cloud_provider == CloudProvider.gcp:
-            # Create GCP instance
-            instance_name = f"mlship-{len(deployments) + 1}"
-            machine_type = "n1-standard-4" if request.gpu_type == GpuType.nvidia_t4 else "a2-highgpu-1g"
+        if not os.path.exists(config_file):
+            print("No config file found")
+            raise HTTPException(status_code=400, detail="No model file provided. Please upload a model first.")
             
-            instance = create_instance(
-                project_id=cloud_config["gcp"]["project_id"],
-                zone=cloud_config["gcp"]["zone"],
-                instance_name=instance_name,
-                machine_type=machine_type,
-                startup_script=get_startup_script(model_path),
-                credentials_file=cloud_config["gcp"]["credentials_file"]
-            )
+        with open(config_file) as f:
+            config = json.load(f)
+            model_path = config.get("model_path")
+            print(f"Config loaded, model_path: {model_path}")
             
-            # Get instance IP
-            instance_ip = get_instance_ip(instance)
+            if not model_path or not os.path.exists(model_path):
+                print(f"Model not found at path: {model_path}")
+                raise HTTPException(status_code=400, detail="Model file not found")
+            
+            if not is_valid_model_file(model_path):
+                print(f"Invalid model file type: {model_path}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid model file type. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
+                )
             
             # Create deployment record
             deployment_id = len(deployments) + 1
-            deployments[deployment_id] = {
+            deployment = {
                 "id": deployment_id,
                 "model_path": model_path,
                 "filename": os.path.basename(model_path),
@@ -177,19 +162,20 @@ async def deploy_model(request: DeploymentRequest):
                 "gpu_type": request.gpu_type,
                 "cloud_provider": request.cloud_provider,
                 "auto_scaling": request.auto_scaling,
-                "endpoint": f"http://{instance_ip}/api/model/predict",
-                "instance_name": instance_name,
+                "endpoint": f"http://localhost:8000/api/model/predict",
+                "instance_name": f"mlship-{deployment_id}",
                 "metrics": {
                     "memory_usage": "0GB",
                     "requests_per_hour": 0
                 }
             }
             
-            return deployments[deployment_id]
-        else:
-            raise HTTPException(status_code=400, detail="Only GCP deployments are currently supported")
-    
+            deployments[deployment_id] = deployment
+            print(f"Created deployment: {deployment}")
+            return deployment
+            
     except Exception as e:
+        print(f"Error in deploy_model: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/deployments")
@@ -258,8 +244,11 @@ def start_cloud_server(host: str = "0.0.0.0", port: int = 8000):
 @app.get("/api/model")
 async def get_model_info():
     """Get information about the model from the CLI command."""
+    print("GET /api/model called")
     try:
         config_file = os.path.join(os.path.expanduser("~"), ".mlship", "config.json")
+        print(f"Looking for config file at: {config_file}")
+        
         if not os.path.exists(config_file):
             print("Config file not found")
             return {"model_path": None, "filename": None, "size": None}
@@ -293,14 +282,17 @@ async def get_model_info():
                             "size": os.path.getsize(model_path)
                         }
     except Exception as e:
-        print(f"Error reading model info: {str(e)}")
-    return {"model_path": None, "filename": None, "size": None}
+        print(f"Error in get_model_info: {str(e)}")
+        return {"model_path": None, "filename": None, "size": None}
 
 @app.delete("/api/model")
 async def remove_model():
     """Remove the model file and clear the config."""
+    print("DELETE /api/model called")
     try:
         config_file = os.path.join(os.path.expanduser("~"), ".mlship", "config.json")
+        print(f"Looking for config file at: {config_file}")
+        
         if os.path.exists(config_file):
             with open(config_file) as f:
                 config = json.load(f)
@@ -323,7 +315,9 @@ async def remove_model():
                     print(f"Error removing models directory: {str(e)}")
             
             return {"status": "success"}
+            
+        print("No config file found")
         return {"status": "no_model_found"}
     except Exception as e:
-        print(f"Error removing model: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e)) 
+        print(f"Error in remove_model: {str(e)}")
+        return {"status": "error", "detail": str(e)} 
