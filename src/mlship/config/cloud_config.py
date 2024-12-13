@@ -42,7 +42,7 @@ def get_cloud_config() -> Dict:
             "location": os.getenv("AZURE_LOCATION", "eastus"),
             "instance_types": get_instance_types("azure")
         },
-        "frontend_url": os.getenv("FRONTEND_URL", "http://localhost:3000")
+        "frontend_url": os.getenv("FRONTEND_URL", "https://mlship-cloud.vercel.app")
     }
 
 def get_provider_config(provider: str) -> Dict:

@@ -12,6 +12,7 @@ from .utils.constants import PID_FILE, METRICS_FILE, LOG_FILE, CONFIG_FILE
 from .utils.daemon import cleanup_files, daemonize
 from .utils.create_test_model import create_test_model
 from .server.cloud_app import deploy_from_cli
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -90,32 +91,26 @@ def deploy(model_path, host, port, ui, daemon):
         sys.exit(1)
 
 @cli.command()
-@click.argument('model_path', type=click.Path(exists=True))
-@click.option('--host', default='0.0.0.0', help='Host to bind to')
-@click.option('--port', default=3000, help='Port to bind to')
-def serve(model_path, host, port):
-    """Serve a model with the cloud dashboard UI.
+@click.argument('model_path', type=click.Path(exists=True), required=False)
+@click.option("--port", default=8000, help="Port to run the server on")
+def serve(model_path: Optional[str], port: int):
+    """Start the MLship server.
     
-    MODEL_PATH is the path to the model file to serve.
-    This will start the cloud dashboard UI on port 3000 (default).
-    
-    Examples:
-    \b
-    mlship serve model.joblib                # Start dashboard on port 3000
-    mlship serve model.pkl --port 3001       # Custom port for dashboard
+    If MODEL_PATH is provided, it will be used for deployment.
+    If no MODEL_PATH is provided, it will start the server only.
     """
+    import webbrowser
+    from .server.cloud_app import deploy_from_cli, start_cloud_server
+    from .config.cloud_config import get_frontend_url
+    
     try:
-        # Convert to absolute path
-        abs_path = os.path.abspath(model_path)
-        # Save model path for cloud deployment
-        from .server.cloud_app import save_model_path
-        save_model_path(abs_path)
-        # Open the cloud dashboard
-        import webbrowser
-        webbrowser.open(f"http://{host if host != '0.0.0.0' else 'localhost'}:{port}")
-        # Start the cloud server
-        from .server.cloud_app import start_cloud_server
-        start_cloud_server(host=host, port=8000)  # API server on 8000
+        if model_path:
+            # Deploy the model using the cloud dashboard
+            deploy_from_cli(model_path)
+        else:
+            # Just start the server and open the frontend
+            webbrowser.open(get_frontend_url())
+            start_cloud_server(port=port)
     except Exception as e:
         logger.error(f"Failed to serve model: {str(e)}")
         click.echo(f"Failed to serve model: {str(e)}")
